@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/douyin/client-entry.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://lf-douyin-pc-web\\.douyinstatic\\.com/obj/douyin-pc-web/ies/douyin_web/client-entry~[a-f0-9]+\\.[a-f0-9]+\\.js$",
+      "initiatorDomains" : ["www.douyin.com"],
+      "resourceTypes": ["script"]
+    }
+  }
+]
