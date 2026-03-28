@@ -1,7 +1,7 @@
 {
-  "name": "zhi-lian-cai-ji",
-  "displayName": "智联采集",
-  "description": "社媒数据采集助手 - 小红书、抖音、快手数据采集与导出工具",
+  "name": "zhi-lian-ai",
+  "displayName": "智联AI",
+  "description": "智联AI采集助手 - 小红书、抖音、快手数据采集与导出工具",
   "private": true,
   "version": "1.0.0",
   "type": "module",

@@ -22,7 +22,7 @@ const contactItems = [
 ];
 
 const announcements = [
-  { title: '智联采集 v1.0.0 正式发布', date: '2025-03-28', isNew: true },
+  { title: '智联AI v1.0.0 正式发布', date: '2025-03-28', isNew: true },
   { title: '小红书数据采集功能上线', date: '2025-03-27', isNew: true },
   { title: '支持批量导出 Excel 格式', date: '2025-03-26', isNew: false },
   { title: '优化数据采集性能', date: '2025-03-25', isNew: false }
@@ -70,7 +70,7 @@ export default function Overview() {
   const recentTasks = tasks.slice(0, 3);
 
   const carouselItems = [
-    { title: '欢迎使用智联采集', desc: '一键采集社媒数据，轻松导出分析' },
+    { title: '欢迎使用智联AI', desc: '一键采集社媒数据，轻松导出分析' },
     { title: '支持多平台', desc: '小红书、抖音、快手等主流平台' },
     { title: '数据安全', desc: '所有数据本地存储，隐私有保障' }
   ];
@@ -84,8 +84,8 @@ export default function Overview() {
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <span className="font-bold text-lg">智联采集</span>
-              <p className="text-xs text-gray-400">社媒数据采集助手</p>
+              <span className="font-bold text-lg">智联AI</span>
+              <p className="text-xs text-gray-400">数据采集助手</p>
             </div>
           </div>
           <div className="text-xs text-gray-400 bg-white px-3 py-1.5 rounded-full shadow-sm">

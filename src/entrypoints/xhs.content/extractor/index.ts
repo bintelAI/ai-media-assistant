@@ -139,25 +139,25 @@ function extractFromDOM(): ExtractResult<PostEntity> {
 
 export async function extractAuthor(): Promise<ExtractResult<AuthorEntity>> {
   try {
-    console.log('[智联采集] 开始提取作者数据...');
+    console.log('[智联AI] 开始提取作者数据...');
     
     const stateData = extractAuthorFromPageState();
     if (stateData.success) {
-      console.log('[智联采集] 从页面状态提取作者数据成功:', stateData.data);
+      console.log('[智联AI] 从页面状态提取作者数据成功:', stateData.data);
       return stateData;
     }
-    console.log('[智联采集] 从页面状态提取失败:', stateData.error);
+    console.log('[智联AI] 从页面状态提取失败:', stateData.error);
     
     const domData = extractAuthorFromDOM();
     if (domData.success) {
-      console.log('[智联采集] 从DOM提取作者数据成功:', domData.data);
+      console.log('[智联AI] 从DOM提取作者数据成功:', domData.data);
       return domData;
     }
-    console.log('[智联采集] 从DOM提取失败:', domData.error);
+    console.log('[智联AI] 从DOM提取失败:', domData.error);
     
     return { success: false, error: '无法提取作者数据' };
   } catch (error) {
-    console.error('[智联采集] 提取作者数据异常:', error);
+    console.error('[智联AI] 提取作者数据异常:', error);
     return { success: false, error: (error as Error).message };
   }
 }
@@ -167,14 +167,14 @@ function extractAuthorFromPageState(): ExtractResult<AuthorEntity> {
     const win = window as any;
     const state = win.__INITIAL_STATE__;
     
-    console.log('[智联采集] __INITIAL_STATE__:', state);
+    console.log('[智联AI] __INITIAL_STATE__:', state);
     
     if (!state) {
       return { success: false, error: '__INITIAL_STATE__ 不存在' };
     }
     
     const userInfo = state.user?.userPageInfo || state.userPageInfo;
-    console.log('[智联采集] userInfo:', userInfo);
+    console.log('[智联AI] userInfo:', userInfo);
     
     if (!userInfo) {
       return { success: false, error: '用户页面信息不存在' };
@@ -183,12 +183,12 @@ function extractAuthorFromPageState(): ExtractResult<AuthorEntity> {
     const basicInfo = userInfo.basicInfo || {};
     const interactions = userInfo.interactions || [];
     
-    console.log('[智联采集] basicInfo:', basicInfo);
-    console.log('[智联采集] interactions:', interactions);
+    console.log('[智联AI] basicInfo:', basicInfo);
+    console.log('[智联AI] interactions:', interactions);
     
     const getInteraction = (name: string): number | undefined => {
       const item = interactions.find((i: any) => i.name === name);
-      console.log(`[智联采集] 查找互动数据 "${name}":`, item);
+      console.log(`[智联AI] 查找互动数据 "${name}":`, item);
       return item?.count;
     };
     
@@ -210,7 +210,7 @@ function extractAuthorFromPageState(): ExtractResult<AuthorEntity> {
       likedCount = interactions[2]?.count;
     }
     
-    console.log('[智联采集] 解析后的数据 - 粉丝:', fansCount, '关注:', followCount, '获赞:', likedCount);
+    console.log('[智联AI] 解析后的数据 - 粉丝:', fansCount, '关注:', followCount, '获赞:', likedCount);
     
     const author: Partial<AuthorEntity> = {
       platform: 'xhs',
@@ -230,7 +230,7 @@ function extractAuthorFromPageState(): ExtractResult<AuthorEntity> {
     
     return { success: true, data: author as AuthorEntity };
   } catch (error) {
-    console.error('[智联采集] extractAuthorFromPageState 异常:', error);
+    console.error('[智联AI] extractAuthorFromPageState 异常:', error);
     return { success: false, error: (error as Error).message };
   }
 }
@@ -247,10 +247,10 @@ function extractAuthorFromDOM(): ExtractResult<AuthorEntity> {
     const bioEl = document.querySelector('.user-desc, .user-bio, .desc');
     
     const statsContainer = document.querySelector('.user-info, .user-side, .stats-container, .data-info');
-    console.log('[智联采集] statsContainer:', statsContainer?.innerHTML);
+    console.log('[智联AI] statsContainer:', statsContainer?.innerHTML);
     
     const allCountElements = document.querySelectorAll('[class*="count"], [class*="num"]');
-    console.log('[智联采集] 所有计数元素:', allCountElements);
+    console.log('[智联AI] 所有计数元素:', allCountElements);
     
     let fansCount: number | undefined;
     let followCount: number | undefined;
@@ -262,12 +262,12 @@ function extractAuthorFromDOM(): ExtractResult<AuthorEntity> {
       className: el.className,
       parentText: el.parentElement?.textContent
     }));
-    console.log('[智联采集] 计数文本:', countTexts);
+    console.log('[智联AI] 计数文本:', countTexts);
     
     const userInfoSection = document.querySelector('.user-info, .user-basic-info, .user-side');
     if (userInfoSection) {
       const allText = userInfoSection.textContent || '';
-      console.log('[智联采集] 用户信息区域文本:', allText);
+      console.log('[智联AI] 用户信息区域文本:', allText);
       
       const fansMatch = allText.match(/粉丝[^\d]*(\d+\.?\d*[万千百]?)/);
       const followMatch = allText.match(/关注[^\d]*(\d+\.?\d*[万千百]?)/);
@@ -288,7 +288,7 @@ function extractAuthorFromDOM(): ExtractResult<AuthorEntity> {
     if (!likedCount && likedEl) likedCount = parseChineseNumber(likedEl.textContent || '');
     if (notesEl) workCount = parseChineseNumber(notesEl.textContent || '');
     
-    console.log('[智联采集] DOM解析结果 - 粉丝:', fansCount, '关注:', followCount, '获赞:', likedCount, '作品:', workCount);
+    console.log('[智联AI] DOM解析结果 - 粉丝:', fansCount, '关注:', followCount, '获赞:', likedCount, '作品:', workCount);
     
     const author: Partial<AuthorEntity> = {
       platform: 'xhs',
@@ -306,7 +306,7 @@ function extractAuthorFromDOM(): ExtractResult<AuthorEntity> {
     
     return { success: true, data: author as AuthorEntity };
   } catch (error) {
-    console.error('[智联采集] extractAuthorFromDOM 异常:', error);
+    console.error('[智联AI] extractAuthorFromDOM 异常:', error);
     return { success: false, error: (error as Error).message };
   }
 }

@@ -13,7 +13,7 @@ export default defineContentScript({
   runAt: 'document_start',
   
   main() {
-    console.log('[智联采集] 星图 Content Script 已加载');
+    console.log('[智联AI] 星图 Content Script 已加载');
     
     setupXhrInterceptor();
     
@@ -53,7 +53,7 @@ function setupXhrInterceptor() {
               handleApiData(url, data);
             }
           } catch (e) {
-            console.warn('[智联采集] 解析响应失败:', e);
+            console.warn('[智联AI] 解析响应失败:', e);
           }
         }
         if (originalOnReadyStateChange) {
@@ -65,7 +65,7 @@ function setupXhrInterceptor() {
     return originalSend.apply(this, [body] as any);
   };
   
-  console.log('[智联采集] 星图 XHR 拦截器已设置');
+  console.log('[智联AI] 星图 XHR 拦截器已设置');
 }
 
 function isDataApiUrl(url: string): boolean {
@@ -83,7 +83,7 @@ function isDataApiUrl(url: string): boolean {
 function handleApiData(url: string, data: any) {
   if (!data) return;
   
-  console.log('[智联采集] 星图拦截到数据:', url.split('?')[0]);
+  console.log('[智联AI] 星图拦截到数据:', url.split('?')[0]);
   
   if (url.includes('/author/') || url.includes('/daren/')) {
     handleAuthorData(data);
@@ -100,7 +100,7 @@ function handleAuthorData(data: any) {
   const authorData = extractAuthorData(author);
   if (authorData) {
     collectedAuthors.set(authorId, authorData);
-    console.log(`[智联采集] 星图缓存达人: ${authorId} - ${authorData.name}`);
+    console.log(`[智联AI] 星图缓存达人: ${authorId} - ${authorData.name}`);
   }
 }
 
@@ -118,7 +118,7 @@ function handleVideoData(data: any) {
   });
   
   if (collectedPosts.size > 0) {
-    console.log(`[智联采集] 星图缓存视频数据`);
+    console.log(`[智联AI] 星图缓存视频数据`);
     debouncedSavePosts();
   }
 }
@@ -184,7 +184,7 @@ function debouncedSavePosts() {
 }
 
 function onPageLoaded() {
-  console.log('[智联采集] 星图页面加载完成:', currentPageType);
+  console.log('[智联AI] 星图页面加载完成:', currentPageType);
   
   setTimeout(() => {
     injectUIByPageType(currentPageType);
@@ -226,7 +226,7 @@ function observePageChanges() {
 }
 
 function onPageChanged(pageType: PageType) {
-  console.log('[智联采集] 星图页面切换:', pageType);
+  console.log('[智联AI] 星图页面切换:', pageType);
   
   removeInjectedUI();
   

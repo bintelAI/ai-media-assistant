@@ -13,7 +13,7 @@ export default defineContentScript({
   runAt: 'document_start',
   
   main() {
-    console.log('[智联采集] 快手 Content Script 已加载');
+    console.log('[智联AI] 快手 Content Script 已加载');
     
     setupXhrInterceptor();
     
@@ -53,7 +53,7 @@ function setupXhrInterceptor() {
               handleApiData(url, data);
             }
           } catch (e) {
-            console.warn('[智联采集] 解析响应失败:', e);
+            console.warn('[智联AI] 解析响应失败:', e);
           }
         }
         if (originalOnReadyStateChange) {
@@ -65,7 +65,7 @@ function setupXhrInterceptor() {
     return originalSend.apply(this, [body] as any);
   };
   
-  console.log('[智联采集] 快手 XHR 拦截器已设置');
+  console.log('[智联AI] 快手 XHR 拦截器已设置');
 }
 
 function isDataApiUrl(url: string): boolean {
@@ -84,7 +84,7 @@ function isDataApiUrl(url: string): boolean {
 function handleApiData(url: string, data: any) {
   if (!data) return;
   
-  console.log('[智联采集] 快手拦截到数据:', url.split('?')[0]);
+  console.log('[智联AI] 快手拦截到数据:', url.split('?')[0]);
   
   if (url.includes('/photo/info/') || url.includes('/feed/detail')) {
     handleVideoDetailData(data);
@@ -102,7 +102,7 @@ function handleVideoDetailData(data: any) {
   const postData = extractPostData(photo);
   if (postData) {
     collectedPosts.set(photo.id, postData);
-    console.log(`[智联采集] 快手缓存视频: ${photo.id}`);
+    console.log(`[智联AI] 快手缓存视频: ${photo.id}`);
   }
 }
 
@@ -113,7 +113,7 @@ function handleUserData(data: any) {
   const authorData = extractAuthorData(user);
   if (authorData) {
     collectedAuthors.set(user.id, authorData);
-    console.log(`[智联采集] 快手缓存用户: ${user.id} - ${authorData.name}`);
+    console.log(`[智联AI] 快手缓存用户: ${user.id} - ${authorData.name}`);
   }
 }
 
@@ -133,7 +133,7 @@ function handleFeedData(data: any) {
   });
   
   if (count > 0) {
-    console.log(`[智联采集] 快手缓存 ${count} 条视频数据`);
+    console.log(`[智联AI] 快手缓存 ${count} 条视频数据`);
     debouncedSavePosts();
   }
 }
@@ -201,7 +201,7 @@ function debouncedSavePosts() {
 }
 
 function onPageLoaded() {
-  console.log('[智联采集] 快手页面加载完成:', currentPageType);
+  console.log('[智联AI] 快手页面加载完成:', currentPageType);
   
   setTimeout(() => {
     injectUIByPageType(currentPageType);
@@ -247,7 +247,7 @@ function observePageChanges() {
 }
 
 function onPageChanged(pageType: PageType) {
-  console.log('[智联采集] 快手页面切换:', pageType);
+  console.log('[智联AI] 快手页面切换:', pageType);
   
   removeInjectedUI();
   

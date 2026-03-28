@@ -13,7 +13,7 @@ export default defineContentScript({
   runAt: 'document_start',
   
   main() {
-    console.log('[智联采集] 抖音 Content Script 已加载');
+    console.log('[智联AI] 抖音 Content Script 已加载');
     
     setupXhrInterceptor();
     
@@ -53,7 +53,7 @@ function setupXhrInterceptor() {
               handleApiData(url, data);
             }
           } catch (e) {
-            console.warn('[智联采集] 解析响应失败:', e);
+            console.warn('[智联AI] 解析响应失败:', e);
           }
         }
         if (originalOnReadyStateChange) {
@@ -65,7 +65,7 @@ function setupXhrInterceptor() {
     return originalSend.apply(this, [body] as any);
   };
   
-  console.log('[智联采集] 抖音 XHR 拦截器已设置');
+  console.log('[智联AI] 抖音 XHR 拦截器已设置');
 }
 
 function isDataApiUrl(url: string): boolean {
@@ -84,7 +84,7 @@ function isDataApiUrl(url: string): boolean {
 function handleApiData(url: string, data: any) {
   if (!data) return;
   
-  console.log('[智联采集] 抖音拦截到数据:', url.split('?')[0]);
+  console.log('[智联AI] 抖音拦截到数据:', url.split('?')[0]);
   
   if (url.includes('/aweme/detail/') || url.includes('/aweme/post/')) {
     handleVideoDetailData(data);
@@ -102,7 +102,7 @@ function handleVideoDetailData(data: any) {
   const postData = extractPostData(aweme);
   if (postData) {
     collectedPosts.set(aweme.aweme_id, postData);
-    console.log(`[智联采集] 抖音缓存视频: ${aweme.aweme_id}`);
+    console.log(`[智联AI] 抖音缓存视频: ${aweme.aweme_id}`);
   }
 }
 
@@ -113,7 +113,7 @@ function handleUserData(data: any) {
   const authorData = extractAuthorData(user);
   if (authorData) {
     collectedAuthors.set(user.uid, authorData);
-    console.log(`[智联采集] 抖音缓存用户: ${user.uid} - ${authorData.name}`);
+    console.log(`[智联AI] 抖音缓存用户: ${user.uid} - ${authorData.name}`);
   }
 }
 
@@ -132,7 +132,7 @@ function handleFeedData(data: any) {
   });
   
   if (count > 0) {
-    console.log(`[智联采集] 抖音缓存 ${count} 条视频数据`);
+    console.log(`[智联AI] 抖音缓存 ${count} 条视频数据`);
     debouncedSavePosts();
   }
 }
@@ -201,7 +201,7 @@ function debouncedSavePosts() {
 }
 
 function onPageLoaded() {
-  console.log('[智联采集] 抖音页面加载完成:', currentPageType);
+  console.log('[智联AI] 抖音页面加载完成:', currentPageType);
   
   setTimeout(() => {
     injectUIByPageType(currentPageType);
@@ -247,7 +247,7 @@ function observePageChanges() {
 }
 
 function onPageChanged(pageType: PageType) {
-  console.log('[智联采集] 抖音页面切换:', pageType);
+  console.log('[智联AI] 抖音页面切换:', pageType);
   
   removeInjectedUI();
   

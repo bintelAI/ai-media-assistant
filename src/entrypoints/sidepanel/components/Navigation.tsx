@@ -6,8 +6,9 @@ const navItems = [
   { id: 'overview', label: '总览', icon: LayoutDashboard },
   { id: 'data', label: '数据', icon: Database },
   { id: 'tasks', label: '任务', icon: ListTodo },
-  { id: 'downloads', label: '下载', icon: Download },
-  { id: 'settings', label: '设置', icon: Settings }
+  // { id: 'downloads', label: '下载', icon: Download },
+ { id: 'ai', label: 'PRA', icon: Download },
+  { id: 'settings', label: '', icon: Settings }
 ] as const;
 
 export default function Navigation() {
@@ -17,7 +18,7 @@ export default function Navigation() {
     <nav className="bg-white border-b border-gray-200 px-4 py-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <span className="text-lg font-bold text-primary-600 mr-4">智联采集</span>
+          {/* <span className="text-lg font-bold text-primary-600 mr-4">智联AI</span> */}
           {navItems.map((item) => {
             const Icon = item.icon;
             return (

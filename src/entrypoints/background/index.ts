@@ -8,7 +8,7 @@ import type { Message, MessageResponse } from '@/shared/types/messages';
 import type { PostEntity, AuthorEntity, CommentEntity } from '@/shared/types/entities';
 
 export default defineBackground(() => {
-  console.log('智联采集 Background Service Worker started');
+  console.log('智联AI Background Service Worker started');
 
   initDB().catch(console.error);
 
@@ -81,7 +81,7 @@ async function handleCollectPost(data: unknown): Promise<MessageResponse<PostEnt
     
     if (postId && cachedPosts.has(postId)) {
       postData = { ...cachedPosts.get(postId), ...post };
-      console.log(`[智联采集] 从缓存获取帖子数据: ${postId}`, postData);
+      console.log(`[智联AI] 从缓存获取帖子数据: ${postId}`, postData);
     }
     
     const taskId = await addTask({
@@ -139,7 +139,7 @@ async function handleCollectAuthor(data: unknown): Promise<MessageResponse<Autho
     
     if (authorId && cachedAuthors.has(authorId)) {
       authorData = { ...cachedAuthors.get(authorId), ...author };
-      console.log(`[智联采集] 从缓存获取用户数据: ${authorId}`, authorData);
+      console.log(`[智联AI] 从缓存获取用户数据: ${authorId}`, authorData);
     }
     
     const taskId = await addTask({
@@ -312,16 +312,16 @@ async function handleCachePosts(data: unknown): Promise<MessageResponse> {
             sourcePageType: post.sourcePageType
           });
           newCount++;
-          console.log(`[智联采集] 自动保存帖子: ${post.postId} - ${post.title}`);
+          console.log(`[智联AI] 自动保存帖子: ${post.postId} - ${post.title}`);
         } catch (e: any) {
           if (!e.message?.includes('already exists')) {
-            console.warn(`[智联采集] 保存帖子失败: ${post.postId}`, e.message);
+            console.warn(`[智联AI] 保存帖子失败: ${post.postId}`, e.message);
           }
         }
       }
     }
     
-    console.log(`[智联采集] 已缓存 ${posts.length} 条帖子，新增 ${newCount} 条，总计 ${cachedPosts.size} 条`);
+    console.log(`[智联AI] 已缓存 ${posts.length} 条帖子，新增 ${newCount} 条，总计 ${cachedPosts.size} 条`);
     
     return { success: true, data: { count: cachedPosts.size, newCount } };
   } catch (error) {
@@ -355,10 +355,10 @@ async function handleCacheAuthor(data: unknown): Promise<MessageResponse> {
           contactInfo: author.contactInfo,
           sourcePageUrl: author.sourcePageUrl || ''
         });
-        console.log(`[智联采集] 自动保存用户: ${author.authorId} - ${author.name}`, author);
+        console.log(`[智联AI] 自动保存用户: ${author.authorId} - ${author.name}`, author);
       } catch (e: any) {
         if (!e.message?.includes('already exists')) {
-          console.warn(`[智联采集] 保存用户失败: ${author.authorId}`, e.message);
+          console.warn(`[智联AI] 保存用户失败: ${author.authorId}`, e.message);
         }
       }
     }

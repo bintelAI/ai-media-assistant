@@ -13,7 +13,7 @@ export default defineContentScript({
   runAt: 'document_start',
   
   main() {
-    console.log('[智联采集] 小红书 Content Script 已加载');
+    console.log('[智联AI] 小红书 Content Script 已加载');
     
     setupXhrInterceptor();
     
@@ -54,7 +54,7 @@ function setupXhrInterceptor() {
               handleApiData(url, data);
             }
           } catch (e) {
-            console.warn('[智联采集] 解析响应失败:', e);
+            console.warn('[智联AI] 解析响应失败:', e);
           }
         }
         if (originalOnReadyStateChange) {
@@ -66,7 +66,7 @@ function setupXhrInterceptor() {
     return originalSend.apply(this, [body] as any);
   };
   
-  console.log('[智联采集] XHR 拦截器已设置');
+  console.log('[智联AI] XHR 拦截器已设置');
 }
 
 function isDataApiUrl(url: string): boolean {
@@ -85,7 +85,7 @@ function isDataApiUrl(url: string): boolean {
 function handleApiData(url: string, data: any) {
   if (!data || !data.data) return;
   
-  console.log('[智联采集] 拦截到数据:', url.split('?')[0]);
+  console.log('[智联AI] 拦截到数据:', url.split('?')[0]);
   
   if (url.includes('/api/sns/web/v1/homefeed') || url.includes('/api/sns/web/v1/search/notes')) {
     handleFeedData(data);
@@ -114,7 +114,7 @@ function handleFeedData(data: any) {
   });
   
   if (count > 0) {
-    console.log(`[智联采集] 缓存 ${count} 条帖子数据`);
+    console.log(`[智联AI] 缓存 ${count} 条帖子数据`);
     debouncedSavePosts();
   }
 }
@@ -135,7 +135,7 @@ function handleUserPostsData(data: any) {
   });
   
   if (count > 0) {
-    console.log(`[智联采集] 缓存用户帖子 ${count} 条`);
+    console.log(`[智联AI] 缓存用户帖子 ${count} 条`);
     debouncedSavePosts();
   }
 }
@@ -147,7 +147,7 @@ function handleNoteDetailData(data: any) {
   const postData = extractPostData(note);
   if (postData) {
     collectedPosts.set(note.noteId, postData);
-    console.log(`[智联采集] 缓存帖子详情: ${note.noteId}`);
+    console.log(`[智联AI] 缓存帖子详情: ${note.noteId}`);
   }
 }
 
@@ -158,7 +158,7 @@ function handleUserData(data: any) {
   const authorData = extractAuthorData(user);
   if (authorData) {
     collectedAuthors.set(user.userId, authorData);
-    console.log(`[智联采集] 缓存用户数据: ${user.userId} - ${authorData.name}`);
+    console.log(`[智联AI] 缓存用户数据: ${user.userId} - ${authorData.name}`);
   }
 }
 
@@ -226,7 +226,7 @@ function debouncedSavePosts() {
 }
 
 function onPageLoaded() {
-  console.log('[智联采集] 页面加载完成:', currentPageType);
+  console.log('[智联AI] 页面加载完成:', currentPageType);
   
   const state = (window as any).__INITIAL_STATE__;
   if (state) {
@@ -250,7 +250,7 @@ function extractPostFromState(state: any) {
     const postData = extractPostData(noteData.note);
     if (postData) {
       collectedPosts.set(noteData.note.noteId, postData);
-      console.log('[智联采集] 从页面状态缓存帖子:', noteId);
+      console.log('[智联AI] 从页面状态缓存帖子:', noteId);
     }
   }
 }
@@ -284,7 +284,7 @@ function extractAuthorFromState(state: any) {
     };
     
     collectedAuthors.set(basicInfo.userId, authorData);
-    console.log('[智联采集] 从页面状态缓存用户:', basicInfo.userId, authorData);
+    console.log('[智联AI] 从页面状态缓存用户:', basicInfo.userId, authorData);
   }
 }
 
@@ -329,7 +329,7 @@ function observePageChanges() {
 }
 
 function onPageChanged(pageType: PageType) {
-  console.log('[智联采集] 页面切换:', pageType);
+  console.log('[智联AI] 页面切换:', pageType);
   
   removeInjectedUI();
   
