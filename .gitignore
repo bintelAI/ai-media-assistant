@@ -14,7 +14,7 @@ stats-*.json
 .wxt
 output
 build.sh
-.dist/*
+dist/*
 
 # Editor directories and files
 .vscode/*
@@ -31,3 +31,4 @@ build.sh
 *-lock.json
 *-lock.yaml
 LICENSE
+dist/*
