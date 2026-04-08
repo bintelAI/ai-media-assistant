@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { ExportTarget } from '../types';
 
-type PageType = 'overview' | 'data' | 'tasks' | 'downloads' | 'settings';
+type PageType = 'overview' | 'data' | 'tasks' | 'downloads' | 'settings' | 'batchCollect';
 type DataTabType = 'posts' | 'authors' | 'comments' | 'media';
 
 interface UIState {

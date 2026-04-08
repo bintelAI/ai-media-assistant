@@ -5,6 +5,7 @@ import DataPage from './pages/DataPage';
 import TasksCenter from './pages/TasksCenter';
 import DownloadsCenter from './pages/DownloadsCenter';
 import Settings from './pages/Settings';
+import UrlBatchCollect from './pages/UrlBatchCollect';
 import ExportModal from './components/ExportModal';
 import DetailDrawer from './components/DetailDrawer';
 import Toast from './components/Toast';
@@ -22,6 +23,7 @@ export default function App() {
         {currentPage === 'tasks' && <TasksCenter />}
         {currentPage === 'downloads' && <DownloadsCenter />}
         {currentPage === 'settings' && <Settings />}
+        {currentPage === 'batchCollect' && <UrlBatchCollect />}
       </main>
       
       {exportModalOpen && <ExportModal />}

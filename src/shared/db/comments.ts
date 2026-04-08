@@ -130,3 +130,23 @@ export async function clearComments(): Promise<void> {
   const db = await getDB();
   await db.clear('comments');
 }
+
+/**
+ * 获取有评论的帖子ID列表及评论数量
+ * @returns 帖子ID和评论数量的映射
+ */
+export async function getPostsWithComments(): Promise<Map<string, number>> {
+  const db = await getDB();
+  const comments = await db.getAll('comments');
+  
+  const postCommentCounts = new Map<string, number>();
+  
+  comments.forEach(comment => {
+    if (comment.postId) {
+      const count = postCommentCounts.get(comment.postId) || 0;
+      postCommentCounts.set(comment.postId, count + 1);
+    }
+  });
+  
+  return postCommentCounts;
+}

@@ -1,7 +1,14 @@
 import { create } from 'zustand';
-import type { CommentEntity } from '../types/entities';
-import { queryComments, countComments, deleteComments, clearComments } from '../db/comments';
+import type { CommentEntity, PostEntity } from '../types/entities';
+import { queryComments, countComments, deleteComments, clearComments, getPostsWithComments } from '../db/comments';
+import { queryPosts } from '../db/posts';
 import type { CommentQueryOptions } from '../db/comments';
+
+interface PostWithComments {
+  post: PostEntity | null;
+  postId: string;
+  commentCount: number;
+}
 
 interface CommentsState {
   comments: CommentEntity[];
@@ -9,6 +16,10 @@ interface CommentsState {
   selectedIds: string[];
   loading: boolean;
   filters: CommentQueryOptions;
+  
+  postsWithComments: PostWithComments[];
+  currentPostId: string | null;
+  postsLoading: boolean;
   
   fetchComments: (options?: CommentQueryOptions) => Promise<void>;
   setSelectedIds: (ids: string[]) => void;
@@ -18,6 +29,10 @@ interface CommentsState {
   deleteSelected: () => Promise<void>;
   setFilters: (filters: Partial<CommentQueryOptions>) => void;
   getExportData: (scope: 'all' | 'filtered' | 'selected') => Promise<CommentEntity[]>;
+  
+  fetchPostsWithComments: () => Promise<void>;
+  setCurrentPostId: (postId: string | null) => void;
+  goBackToList: () => void;
 }
 
 export const useCommentsStore = create<CommentsState>((set, get) => ({
@@ -26,6 +41,10 @@ export const useCommentsStore = create<CommentsState>((set, get) => ({
   selectedIds: [],
   loading: false,
   filters: {},
+  
+  postsWithComments: [],
+  currentPostId: null,
+  postsLoading: false,
   
   fetchComments: async (options?: CommentQueryOptions) => {
     set({ loading: true });
@@ -64,12 +83,19 @@ export const useCommentsStore = create<CommentsState>((set, get) => ({
   },
   
   deleteSelected: async () => {
-    const { selectedIds, fetchComments, filters } = get();
+    const { selectedIds, fetchComments, filters, currentPostId } = get();
     if (selectedIds.length === 0) return;
     
     await deleteComments(selectedIds);
     set({ selectedIds: [] });
-    await fetchComments(filters);
+    
+    if (currentPostId) {
+      await fetchComments({ ...filters, postId: currentPostId });
+    } else {
+      await fetchComments(filters);
+    }
+    
+    await get().fetchPostsWithComments();
   },
   
   setFilters: (filters: Partial<CommentQueryOptions>) => {
@@ -90,5 +116,43 @@ export const useCommentsStore = create<CommentsState>((set, get) => ({
       default:
         return [];
     }
+  },
+  
+  fetchPostsWithComments: async () => {
+    set({ postsLoading: true });
+    try {
+      const postCommentCounts = await getPostsWithComments();
+      
+      const postIds = Array.from(postCommentCounts.keys());
+      const allPosts = await queryPosts({});
+      
+      const postsWithComments: PostWithComments[] = postIds.map(postId => {
+        const post = allPosts.find(p => p.postId === postId) || null;
+        return {
+          post,
+          postId,
+          commentCount: postCommentCounts.get(postId) || 0
+        };
+      });
+      
+      postsWithComments.sort((a, b) => b.commentCount - a.commentCount);
+      
+      set({ postsWithComments, postsLoading: false });
+    } catch (error) {
+      console.error('Failed to fetch posts with comments:', error);
+      set({ postsLoading: false });
+    }
+  },
+  
+  setCurrentPostId: (postId: string | null) => {
+    set({ currentPostId: postId, selectedIds: [] });
+    if (postId) {
+      get().fetchComments({ postId });
+    }
+  },
+  
+  goBackToList: () => {
+    set({ currentPostId: null, comments: [], selectedIds: [] });
+    get().fetchPostsWithComments();
   }
 }));

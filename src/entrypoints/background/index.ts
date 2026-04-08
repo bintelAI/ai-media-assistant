@@ -4,7 +4,8 @@ import { addPost, updatePost } from '@/shared/db/posts';
 import { addAuthor, updateAuthor } from '@/shared/db/authors';
 import { addComments } from '@/shared/db/comments';
 import { addTask, updateTask } from '@/shared/db/tasks';
-import type { Message, MessageResponse } from '@/shared/types/messages';
+import { batchCollectManager } from './batchCollectManager';
+import type { Message, MessageResponse, BatchCollectStatusResponse } from '@/shared/types/messages';
 import type { PostEntity, AuthorEntity, CommentEntity } from '@/shared/types/entities';
 
 export default defineBackground(() => {
@@ -66,6 +67,18 @@ async function handleMessage(
     
     case 'cache:author':
       return handleCacheAuthor(message.data);
+    
+    case 'cache:comments':
+      return handleCacheComments(message.data);
+    
+    case 'batch:collect:start':
+      return handleBatchCollectStart(message.data);
+    
+    case 'batch:collect:control':
+      return handleBatchCollectControl(message.data);
+    
+    case 'batch:collect:status':
+      return handleBatchCollectStatus();
     
     default:
       return { success: false, error: `Unknown message type: ${message.type}` };
@@ -367,4 +380,118 @@ async function handleCacheAuthor(data: unknown): Promise<MessageResponse> {
   } catch (error) {
     return { success: false, error: (error as Error).message };
   }
+}
+
+const cachedComments: Map<string, Partial<CommentEntity>> = new Map();
+
+/**
+ * 处理评论缓存消息
+ * @param data 评论数据
+ * @returns 消息响应
+ */
+async function handleCacheComments(data: unknown): Promise<MessageResponse> {
+  try {
+    const { comments } = data as { comments: Partial<CommentEntity>[] };
+    
+    let newCount = 0;
+    
+    for (const comment of comments) {
+      if (comment.commentId) {
+        cachedComments.set(comment.commentId, comment);
+        
+        try {
+          await addComments([{
+            platform: comment.platform!,
+            commentId: comment.commentId,
+            postId: comment.postId!,
+            postTitle: comment.postTitle,
+            authorId: comment.authorId,
+            authorName: comment.authorName,
+            authorAvatar: comment.authorAvatar,
+            content: comment.content || '',
+            likeCount: comment.likeCount,
+            replyCount: comment.replyCount,
+            publishTime: comment.publishTime,
+            sourcePageUrl: comment.sourcePageUrl || ''
+          }]);
+          newCount++;
+          console.log(`[智联AI] 自动保存评论: ${comment.commentId} - ${comment.authorName}`);
+        } catch (e: any) {
+          if (!e.message?.includes('already exists')) {
+            console.warn(`[智联AI] 保存评论失败: ${comment.commentId}`, e.message);
+          }
+        }
+      }
+    }
+    
+    console.log(`[智联AI] 已缓存 ${comments.length} 条评论，新增 ${newCount} 条，总计 ${cachedComments.size} 条`);
+    
+    return { success: true, data: { count: cachedComments.size, newCount } };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * 处理批量采集开始消息
+ * @param data 批量采集开始数据
+ * @returns 消息响应
+ */
+async function handleBatchCollectStart(data: unknown): Promise<MessageResponse> {
+  try {
+    const { urls } = data as { urls: string[] };
+    
+    if (!urls || urls.length === 0) {
+      return { success: false, error: 'URL列表为空' };
+    }
+
+    batchCollectManager.startBatchCollect(urls);
+    
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * 处理批量采集控制消息
+ * @param data 控制消息数据
+ * @returns 消息响应
+ */
+async function handleBatchCollectControl(data: unknown): Promise<MessageResponse> {
+  try {
+    const { action } = data as { action: 'pause' | 'resume' | 'cancel' };
+    
+    switch (action) {
+      case 'pause':
+        batchCollectManager.pause();
+        break;
+      case 'resume':
+        batchCollectManager.resume();
+        break;
+      case 'cancel':
+        batchCollectManager.cancel();
+        break;
+      default:
+        return { success: false, error: `未知的控制操作: ${action}` };
+    }
+    
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * 处理批量采集状态查询
+ * @returns 批量采集状态响应
+ */
+async function handleBatchCollectStatus(): Promise<MessageResponse<BatchCollectStatusResponse>> {
+  const status: BatchCollectStatusResponse = {
+    isRunning: batchCollectManager.getIsRunning(),
+    isPaused: batchCollectManager.getIsPaused(),
+    progress: batchCollectManager.getProgress()
+  };
+  
+  return { success: true, data: status };
 }

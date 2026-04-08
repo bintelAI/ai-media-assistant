@@ -37,10 +37,16 @@ export default defineConfig({
   },
   srcDir: 'src',
   outDir: 'dist',
+  runner: {
+    chromiumArgs: ['--remote-debugging-port=9222']
+  },
   dev: {
     serverPort: 3000
   },
   vite: () => ({
+    build: {
+      sourcemap: true,
+    },
     server: {
       port: 3000,
       hmr: false

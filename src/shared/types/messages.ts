@@ -1,6 +1,7 @@
 import type { PostEntity, AuthorEntity, CommentEntity, MediaEntity, TaskEntity } from './entities';
 import type { ExportRequest } from './export';
 import type { Platform, PageType, TaskType } from './index';
+import type { BatchCollectProgress, CollectResult } from './batchCollect';
 
 export type MessageType =
   | 'collect:post'
@@ -21,7 +22,12 @@ export type MessageType =
   | 'page:detected'
   | 'sidepanel:open'
   | 'cache:posts'
-  | 'cache:author';
+  | 'cache:author'
+  | 'cache:comments'
+  | 'batch:collect:start'
+  | 'batch:collect:control'
+  | 'batch:collect:progress'
+  | 'batch:collect:status';
 
 export interface Message<T = unknown> {
   type: MessageType;
@@ -95,3 +101,33 @@ export type ExportDataHandler = (
 export type DownloadMediaHandler = (
   message: DownloadMediaMessage
 ) => Promise<MessageResponse<void>>;
+
+/**
+ * 批量采集开始消息
+ */
+export interface BatchCollectStartMessage {
+  urls: string[];
+}
+
+/**
+ * 批量采集控制消息
+ */
+export interface BatchCollectControlMessage {
+  action: 'pause' | 'resume' | 'cancel';
+}
+
+/**
+ * 批量采集进度消息
+ */
+export interface BatchCollectProgressMessage {
+  progress: BatchCollectProgress;
+}
+
+/**
+ * 批量采集状态响应
+ */
+export interface BatchCollectStatusResponse {
+  isRunning: boolean;
+  isPaused: boolean;
+  progress: BatchCollectProgress;
+}

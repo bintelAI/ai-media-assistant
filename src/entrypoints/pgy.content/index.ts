@@ -225,7 +225,7 @@ function observePageChanges() {
     }
   });
   
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.documentElement || document, { childList: true, subtree: true });
 }
 
 function onPageChanged(pageType: PageType) {

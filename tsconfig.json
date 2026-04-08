@@ -4,6 +4,8 @@
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "baseUrl": ".",
+    "sourceMap": true,
+    "inlineSourceMap": false,
     "paths": {
       "@/*": ["./src/*"]
     }
