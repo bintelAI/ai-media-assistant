@@ -77,7 +77,6 @@ export default defineContentScript({
         try {
           const method = (config.method || 'GET').toUpperCase();
           
-          // 对于 GET 请求，将参数添加到 URL 中
           let fullUrl = config.url;
           if (method === 'GET' && config.params) {
             fullUrl = config.url + buildQueryString(config.params);
@@ -89,62 +88,36 @@ export default defineContentScript({
           } else {
             console.log('[智联AI] MAIN world: data:', config.data);
           }
-          
+
+          let requestPromise: Promise<any>;
+
           if (method === 'GET') {
             if (typeof smzsRequest.get === 'function') {
-              // 使用回调风格，参数已经添加到 URL 中
-              smzsRequest.get(fullUrl, undefined, {
-                success: (response: any) => {
-                  clearTimeout(timeout);
-                  console.log('[智联AI] MAIN world: GET 请求成功', response);
-                  resolve(response);
-                },
-                fail: (error: any) => {
-                  clearTimeout(timeout);
-                  console.error('[智联AI] MAIN world: GET 请求失败', error);
-                  reject(new Error(error?.message || '请求失败'));
-                }
-              });
+              requestPromise = smzsRequest.get(fullUrl);
             } else {
-              // 可能是 Promise 风格
-              smzsRequest.get(fullUrl).then((response: any) => {
-                clearTimeout(timeout);
-                console.log('[智联AI] MAIN world: GET 请求成功 (Promise)', response);
-                resolve(response);
-              }).catch((error: any) => {
-                clearTimeout(timeout);
-                console.error('[智联AI] MAIN world: GET 请求失败 (Promise)', error);
-                reject(new Error(error?.message || '请求失败'));
-              });
+              requestPromise = Promise.reject(new Error('_smzsRequest.get 不是函数'));
             }
           } else if (method === 'POST') {
             if (typeof smzsRequest.post === 'function') {
-              smzsRequest.post(fullUrl, config.data || config.params, {
-                success: (response: any) => {
-                  clearTimeout(timeout);
-                  console.log('[智联AI] MAIN world: POST 请求成功', response);
-                  resolve(response);
-                },
-                fail: (error: any) => {
-                  clearTimeout(timeout);
-                  console.error('[智联AI] MAIN world: POST 请求失败', error);
-                  reject(new Error(error?.message || '请求失败'));
-                }
-              });
+              requestPromise = smzsRequest.post(fullUrl, config.data || config.params);
             } else {
-              smzsRequest.post(fullUrl, config.data || config.params).then((response: any) => {
-                clearTimeout(timeout);
-                console.log('[智联AI] MAIN world: POST 请求成功 (Promise)', response);
-                resolve(response);
-              }).catch((error: any) => {
-                clearTimeout(timeout);
-                console.error('[智联AI] MAIN world: POST 请求失败 (Promise)', error);
-                reject(new Error(error?.message || '请求失败'));
-              });
+              requestPromise = Promise.reject(new Error('_smzsRequest.post 不是函数'));
             }
           } else {
-            reject(new Error('不支持的请求方法: ' + method));
+            requestPromise = Promise.reject(new Error('不支持的请求方法: ' + method));
           }
+
+          requestPromise
+            .then((response: any) => {
+              clearTimeout(timeout);
+              console.log('[智联AI] MAIN world: 请求成功', response);
+              resolve(response);
+            })
+            .catch((error: any) => {
+              clearTimeout(timeout);
+              console.error('[智联AI] MAIN world: 请求失败', error);
+              reject(new Error(error?.message || '请求失败'));
+            });
         } catch (error) {
           clearTimeout(timeout);
           console.error('[智联AI] MAIN world: 调用 _smzsRequest 异常', error);

@@ -8,10 +8,11 @@ import Settings from './pages/Settings';
 import UrlBatchCollect from './pages/UrlBatchCollect';
 import ExportModal from './components/ExportModal';
 import DetailDrawer from './components/DetailDrawer';
+import TaskDetailDrawer from './components/TaskDetailDrawer';
 import Toast from './components/Toast';
 
 export default function App() {
-  const { currentPage, exportModalOpen, detailDrawerOpen, toastMessage } = useUIStore();
+  const { currentPage, exportModalOpen, detailDrawerOpen, taskDetailOpen, toastMessage } = useUIStore();
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -28,6 +29,7 @@ export default function App() {
       
       {exportModalOpen && <ExportModal />}
       {detailDrawerOpen && <DetailDrawer />}
+      {taskDetailOpen && <TaskDetailDrawer />}
       {toastMessage && <Toast />}
     </div>
   );

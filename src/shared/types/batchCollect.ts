@@ -76,8 +76,6 @@ export interface BatchCollectConfig {
   minInterval: number;
   maxInterval: number;
   maxRetries: number;
-  pageLoadTimeout: number;
-  maxConcurrentTabs: number;
 }
 
 /**
@@ -86,7 +84,5 @@ export interface BatchCollectConfig {
 export const DEFAULT_BATCH_COLLECT_CONFIG: BatchCollectConfig = {
   minInterval: 3000,
   maxInterval: 10000,
-  maxRetries: 3,
-  pageLoadTimeout: 30000,
-  maxConcurrentTabs: 3
+  maxRetries: 3
 };

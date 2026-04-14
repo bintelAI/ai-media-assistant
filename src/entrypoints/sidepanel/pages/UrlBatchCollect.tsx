@@ -37,9 +37,19 @@ export default function UrlBatchCollect() {
   useEffect(() => {
     const handleMessage = (message: { type: string; data?: { progress: BatchCollectProgress } }) => {
       if (message.type === 'batch:collect:progress' && message.data?.progress) {
-        setProgress(message.data.progress);
-        setIsRunning(message.data.progress.status === 'running' || message.data.progress.status === 'paused');
-        setIsPaused(message.data.progress.status === 'paused');
+        const newProgress = message.data.progress;
+        const prevStatus = progress.status;
+        
+        setProgress(newProgress);
+        setIsRunning(newProgress.status === 'running' || newProgress.status === 'paused');
+        setIsPaused(newProgress.status === 'paused');
+        
+        if (prevStatus === 'running' && newProgress.status === 'completed') {
+          showToast(
+            `批量采集完成！成功 ${newProgress.success} 个，失败 ${newProgress.failed} 个`,
+            newProgress.failed > 0 ? 'info' : 'success'
+          );
+        }
       }
     };
 
@@ -50,7 +60,7 @@ export default function UrlBatchCollect() {
     return () => {
       chrome.runtime.onMessage.removeListener(handleMessage);
     };
-  }, []);
+  }, [progress.status]);
 
   /**
    * 获取当前批量采集状态

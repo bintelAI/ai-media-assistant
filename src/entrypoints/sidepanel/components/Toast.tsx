@@ -26,7 +26,7 @@ export default function Toast() {
   const Icon = icons[toastType];
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 animate-slide-up">
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-slide-down">
       <div className={cn(
         'flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg',
         toastType === 'success' && 'bg-green-500 text-white',

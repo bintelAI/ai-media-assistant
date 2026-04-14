@@ -12,6 +12,8 @@ interface UIState {
   detailDrawerOpen: boolean;
   detailType: 'post' | 'author' | 'comment' | null;
   detailId: string | null;
+  taskDetailOpen: boolean;
+  taskDetailId: string | null;
   toastMessage: string;
   toastType: 'success' | 'error' | 'info';
   
@@ -21,6 +23,8 @@ interface UIState {
   closeExportModal: () => void;
   openDetailDrawer: (type: 'post' | 'author' | 'comment', id: string) => void;
   closeDetailDrawer: () => void;
+  openTaskDetailDrawer: (id: string) => void;
+  closeTaskDetailDrawer: () => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   clearToast: () => void;
 }
@@ -33,6 +37,8 @@ export const useUIStore = create<UIState>((set) => ({
   detailDrawerOpen: false,
   detailType: null,
   detailId: null,
+  taskDetailOpen: false,
+  taskDetailId: null,
   toastMessage: '',
   toastType: 'info',
   
@@ -58,6 +64,14 @@ export const useUIStore = create<UIState>((set) => ({
   
   closeDetailDrawer: () => {
     set({ detailDrawerOpen: false, detailType: null, detailId: null });
+  },
+  
+  openTaskDetailDrawer: (id) => {
+    set({ taskDetailOpen: true, taskDetailId: id });
+  },
+  
+  closeTaskDetailDrawer: () => {
+    set({ taskDetailOpen: false, taskDetailId: null });
   },
   
   showToast: (message, type = 'info') => {

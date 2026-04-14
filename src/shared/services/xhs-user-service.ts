@@ -1,28 +1,95 @@
 import type { AuthorEntity } from '@/shared/types/entities';
 
 /**
- * 小红书用户信息 API 响应结构
+ * 小红书用户信息 API 响应结构（实际格式）
  */
 interface XhsUserOtherInfoResponse {
   success: boolean;
-  data?: {
-    user?: {
-      userId: string;
+  msg: string;
+  code: number;
+  data: {
+    basicInfo: {
       nickname: string;
-      image: string;
-      desc?: string;
-      fansCount?: number;
-      followCount?: number;
-      likedCount?: number;
-      noteCount?: number;
-      location?: string;
-      verified?: boolean;
-      verifiedInfo?: {
-        desc?: string;
-      };
+      images: string;
+      imageb: string;
+      red_id: string;
+      gender: number;
+      ip_location: string;
+      desc: string;
     };
+    interactions: Array<{
+      type: string;
+      name: string;
+      count: string;
+    }>;
+    tab_public: {
+      collection: boolean;
+      collectionNote: { count: number; display: boolean; lock: boolean };
+      collectionBoard: { display: boolean; lock: boolean; count: number };
+      collectionFile: { display: boolean; lock: boolean; count: number };
+    };
+    extra_info: {
+      blockType: string;
+      fstatus: string;
+    };
+    result: {
+      message: string;
+      success: boolean;
+      code: number;
+    };
+    tags: Array<{
+      icon?: string;
+      tagType: string;
+    }>;
   };
-  msg?: string;
+}
+
+/**
+ * 解析数量字符串（如 "1千+" -> 1000, "1万+" -> 10000）
+ * @param countStr 数量字符串
+ * @returns 数字或 undefined
+ */
+function parseCountString(countStr: string): number | undefined {
+  if (!countStr) return undefined;
+
+  const cleanStr = countStr.replace(/[+\s]/g, '');
+
+  if (cleanStr.includes('万')) {
+    const num = parseFloat(cleanStr.replace('万', ''));
+    return Number.isFinite(num) ? Math.round(num * 10000) : undefined;
+  }
+
+  if (cleanStr.includes('千')) {
+    const num = parseFloat(cleanStr.replace('千', ''));
+    return Number.isFinite(num) ? Math.round(num * 1000) : undefined;
+  }
+
+  const num = parseFloat(cleanStr);
+  return Number.isFinite(num) ? Math.round(num) : undefined;
+}
+
+/**
+ * 从 interactions 数组中获取指定类型的数量
+ * @param interactions interactions 数组
+ * @param type 类型（follows, fans, interaction）
+ * @returns 数量或 undefined
+ */
+function getInteractionCount(
+  interactions: XhsUserOtherInfoResponse['data']['interactions'],
+  type: string
+): number | undefined {
+  const item = interactions?.find(i => i.type === type);
+  return item ? parseCountString(item.count) : undefined;
+}
+
+/**
+ * 清理 URL 字符串（移除反引号等）
+ * @param url URL 字符串
+ * @returns 清理后的 URL
+ */
+function cleanUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  return url.replace(/[`]/g, '').trim() || undefined;
 }
 
 /**
@@ -85,31 +152,33 @@ export async function fetchUserOtherInfo(
       return null;
     }
 
-    const result: XhsUserOtherInfoResponse = response.data;
-
-    if (!result.success || !result.data?.user) {
+    const result: XhsUserOtherInfoResponse = response;
+    console.log(`[智联AI] 获取用户信息成功:`, result);
+    if (!result.data?.basicInfo) {
       console.error('[智联AI] 获取用户信息失败:', result.msg);
       return null;
     }
 
-    const user = result.data.user;
+    const basicInfo = result.data.basicInfo;
+    const interactions = result.data.interactions || [];
 
-    return {
+    const authorData: Partial<AuthorEntity> = {
       platform: 'xhs',
-      authorId: user.userId,
-      name: user.nickname || '',
-      avatar: user.image,
-      profileUrl: `https://www.xiaohongshu.com/user/profile/${user.userId}`,
-      bio: user.desc,
-      fansCount: user.fansCount,
-      followCount: user.followCount,
-      likedCount: user.likedCount,
-      workCount: user.noteCount,
-      location: user.location,
-      verified: !!user.verified,
-      verifiedDesc: user.verifiedInfo?.desc,
-      sourcePageUrl: `https://www.xiaohongshu.com/user/profile/${user.userId}`
+      authorId: userId,
+      name: basicInfo.nickname || '',
+      avatar: cleanUrl(basicInfo.images),
+      profileUrl: `https://www.xiaohongshu.com/user/profile/${userId}`,
+      bio: basicInfo.desc,
+      fansCount: getInteractionCount(interactions, 'fans'),
+      followCount: getInteractionCount(interactions, 'follows'),
+      likedCount: getInteractionCount(interactions, 'interaction'),
+      location: basicInfo.ip_location || undefined,
+      sourcePageUrl: `https://www.xiaohongshu.com/user/profile/${userId}`
     };
+
+    console.log(`[智联AI] 解析用户信息成功:`, authorData);
+
+    return authorData;
   } catch (error) {
     console.error('[智联AI] 获取用户信息异常:', error);
     return null;

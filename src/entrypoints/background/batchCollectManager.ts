@@ -1,8 +1,6 @@
 import { parseUrl } from '@/shared/utils/urlParser';
-import { addPost } from '@/shared/db/posts';
 import { addAuthor } from '@/shared/db/authors';
 import { addTask, updateTask } from '@/shared/db/tasks';
-import { TabManager } from './tabManager';
 import { fetchUserOtherInfo } from '@/shared/services/xhs-user-service';
 import type {
   CollectTask,
@@ -12,19 +10,18 @@ import type {
   ParsedUrl
 } from '@/shared/types/batchCollect';
 import { DEFAULT_BATCH_COLLECT_CONFIG } from '@/shared/types/batchCollect';
-import type { PostEntity, AuthorEntity } from '@/shared/types/entities';
+import type { AuthorEntity } from '@/shared/types/entities';
 
 /**
  * 批量采集任务管理器
  * 负责管理URL批量采集任务队列、进度通知和数据保存
- * 支持直接调用API和打开标签页两种采集方式
+ * 仅支持API直接采集方式
  */
 export class BatchCollectManager {
   private taskQueue: CollectTask[] = [];
   private isRunning: boolean = false;
   private isPaused: boolean = false;
   private currentIndex: number = 0;
-  private tabManager: TabManager;
   private config: BatchCollectConfig;
   private progress: BatchCollectProgress;
   private taskId: string | null = null;
@@ -36,7 +33,6 @@ export class BatchCollectManager {
    */
   constructor(config: Partial<BatchCollectConfig> = {}) {
     this.config = { ...DEFAULT_BATCH_COLLECT_CONFIG, ...config };
-    this.tabManager = new TabManager(config);
     this.progress = this.initProgress();
   }
 
@@ -170,17 +166,19 @@ export class BatchCollectManager {
 
   /**
    * 执行单个采集任务
-   * 根据URL类型选择不同的采集方式：
-   * - 小红书用户主页：直接调用API
-   * - 其他类型：打开标签页采集
+   * 仅支持API直接采集方式
    * @param task 采集任务
    * @returns 采集结果
    */
   private async collectTask(task: CollectTask): Promise<CollectResult> {
-    if (this.canUseApiCollect(task.parsed)) {
-      return this.collectViaApi(task);
+    if (!this.canUseApiCollect(task.parsed)) {
+      return {
+        success: false,
+        url: task.url,
+        error: '不支持的URL类型，仅支持小红书用户主页采集'
+      };
     }
-    return this.collectViaTab(task);
+    return this.collectViaApi(task);
   }
 
   /**
@@ -229,140 +227,6 @@ export class BatchCollectManager {
         error: error instanceof Error ? error.message : 'API采集异常'
       };
     }
-  }
-
-  /**
-   * 通过打开标签页采集
-   * @param task 采集任务
-   * @returns 采集结果
-   */
-  private async collectViaTab(task: CollectTask): Promise<CollectResult> {
-    let tabId: number | null = null;
-    let lastError: Error | null = null;
-
-    for (let retry = 0; retry <= this.config.maxRetries; retry++) {
-      if (this.abortController?.signal.aborted) {
-        return {
-          success: false,
-          url: task.url,
-          error: '任务已取消'
-        };
-      }
-
-      try {
-        tabId = await this.tabManager.createBackgroundTab(task.url);
-        await this.tabManager.waitForTabComplete(tabId);
-        const pageData = await this.tabManager.extractDataFromTab(tabId);
-        const savedData = await this.saveData(task.parsed, pageData);
-
-        return {
-          success: true,
-          url: task.url,
-          data: savedData
-        };
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error('未知错误');
-        console.warn(`[BatchCollectManager] 采集失败，第${retry + 1}次尝试:`, task.url, lastError.message);
-
-        if (retry < this.config.maxRetries) {
-          await this.sleep(2000);
-        }
-      } finally {
-        if (tabId) {
-          await this.tabManager.closeTab(tabId);
-        }
-      }
-    }
-
-    return {
-      success: false,
-      url: task.url,
-      error: lastError?.message || '未知错误'
-    };
-  }
-
-  /**
-   * 保存采集的数据
-   * @param parsed 解析后的URL信息
-   * @param pageData 页面数据
-   * @returns 保存的实体数据
-   */
-  private async saveData(parsed: ParsedUrl, pageData: unknown): Promise<PostEntity | AuthorEntity> {
-    const extractedData = this.extractDataFromPage(parsed, pageData);
-
-    if (parsed.pageType === 'post_detail') {
-      const post = await addPost({
-        platform: parsed.platform,
-        postId: (extractedData.id as string) || parsed.id,
-        postType: (extractedData.postType as 'image' | 'video' | 'mixed' | 'text') || 'image',
-        title: (extractedData.title as string) || '',
-        content: (extractedData.content as string) || '',
-        url: parsed.originalUrl,
-        coverUrl: extractedData.coverUrl as string | undefined,
-        authorId: extractedData.authorId as string | undefined,
-        authorName: extractedData.authorName as string | undefined,
-        likeCount: extractedData.likeCount as number | undefined,
-        commentCount: extractedData.commentCount as number | undefined,
-        collectCount: extractedData.collectCount as number | undefined,
-        shareCount: extractedData.shareCount as number | undefined,
-        sourcePageUrl: parsed.originalUrl
-      });
-      return post as unknown as PostEntity;
-    } else if (parsed.pageType === 'author_profile') {
-      const author = await addAuthor({
-        platform: parsed.platform,
-        authorId: (extractedData.id as string) || parsed.id,
-        name: (extractedData.name as string) || '',
-        avatar: extractedData.avatar as string | undefined,
-        profileUrl: parsed.originalUrl,
-        bio: extractedData.bio as string | undefined,
-        fansCount: extractedData.fansCount as number | undefined,
-        followCount: extractedData.followCount as number | undefined,
-        workCount: extractedData.workCount as number | undefined,
-        sourcePageUrl: parsed.originalUrl
-      });
-      return author as unknown as AuthorEntity;
-    }
-
-    throw new Error('不支持的页面类型');
-  }
-
-  /**
-   * 从页面数据中提取结构化数据
-   * @param parsed 解析后的URL信息
-   * @param pageData 页面原始数据
-   * @returns 提取的结构化数据
-   */
-  private extractDataFromPage(parsed: ParsedUrl, pageData: unknown): Record<string, unknown> {
-    const data = pageData as { html?: string; title?: string; url?: string };
-    const result: Record<string, unknown> = {
-      id: parsed.id
-    };
-
-    if (data.title) {
-      result.title = data.title;
-    }
-
-    if (data.html) {
-      const html = data.html;
-
-      const ogTitle = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]*)"/);
-      if (ogTitle) {
-        result.title = ogTitle[1];
-      }
-
-      const ogImage = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/);
-      if (ogImage) {
-        result.coverUrl = ogImage[1];
-      }
-
-      const ogDesc = html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]*)"/);
-      if (ogDesc) {
-        result.content = ogDesc[1];
-      }
-    }
-
-    return result;
   }
 
   /**
@@ -422,8 +286,6 @@ export class BatchCollectManager {
     this.isRunning = false;
     this.isPaused = false;
     this.progress.status = 'completed';
-
-    this.tabManager.closeAllTabs();
 
     if (this.taskId) {
       updateTask(this.taskId, {
