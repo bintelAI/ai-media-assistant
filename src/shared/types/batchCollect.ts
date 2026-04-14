@@ -9,6 +9,8 @@ export interface ParsedUrl {
   pageType: PageType;
   id: string;
   originalUrl: string;
+  xsecSource?: string;
+  xsecToken?: string;
 }
 
 /**

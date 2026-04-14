@@ -3,6 +3,7 @@ import { addPost } from '@/shared/db/posts';
 import { addAuthor } from '@/shared/db/authors';
 import { addTask, updateTask } from '@/shared/db/tasks';
 import { TabManager } from './tabManager';
+import { fetchUserOtherInfo } from '@/shared/services/xhs-user-service';
 import type {
   CollectTask,
   BatchCollectProgress,
@@ -16,6 +17,7 @@ import type { PostEntity, AuthorEntity } from '@/shared/types/entities';
 /**
  * 批量采集任务管理器
  * 负责管理URL批量采集任务队列、进度通知和数据保存
+ * 支持直接调用API和打开标签页两种采集方式
  */
 export class BatchCollectManager {
   private taskQueue: CollectTask[] = [];
@@ -168,10 +170,73 @@ export class BatchCollectManager {
 
   /**
    * 执行单个采集任务
+   * 根据URL类型选择不同的采集方式：
+   * - 小红书用户主页：直接调用API
+   * - 其他类型：打开标签页采集
    * @param task 采集任务
    * @returns 采集结果
    */
   private async collectTask(task: CollectTask): Promise<CollectResult> {
+    if (this.canUseApiCollect(task.parsed)) {
+      return this.collectViaApi(task);
+    }
+    return this.collectViaTab(task);
+  }
+
+  /**
+   * 判断是否可以使用API直接采集
+   * @param parsed 解析后的URL信息
+   * @returns 是否可以使用API
+   */
+  private canUseApiCollect(parsed: ParsedUrl): boolean {
+    return parsed.platform === 'xhs' && parsed.pageType === 'author_profile';
+  }
+
+  /**
+   * 通过API直接采集（不打开标签页）
+   * @param task 采集任务
+   * @returns 采集结果
+   */
+  private async collectViaApi(task: CollectTask): Promise<CollectResult> {
+    console.log(`[BatchCollectManager] 使用API采集: ${task.url}`);
+
+    try {
+      const authorData = await fetchUserOtherInfo(
+        task.parsed.id,
+        task.parsed.xsecSource,
+        task.parsed.xsecToken
+      );
+      
+      if (!authorData) {
+        return {
+          success: false,
+          url: task.url,
+          error: 'API获取用户信息失败'
+        };
+      }
+
+      await addAuthor(authorData as AuthorEntity);
+      
+      return {
+        success: true,
+        url: task.url,
+        data: authorData as AuthorEntity
+      };
+    } catch (error) {
+      return {
+        success: false,
+        url: task.url,
+        error: error instanceof Error ? error.message : 'API采集异常'
+      };
+    }
+  }
+
+  /**
+   * 通过打开标签页采集
+   * @param task 采集任务
+   * @returns 采集结果
+   */
+  private async collectViaTab(task: CollectTask): Promise<CollectResult> {
     let tabId: number | null = null;
     let lastError: Error | null = null;
 

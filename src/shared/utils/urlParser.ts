@@ -51,11 +51,14 @@ function parseXhsUrl(url: string): ParsedUrl | null {
 
   const userMatch = url.match(/xiaohongshu\.com\/user\/profile\/([\w]+)/);
   if (userMatch) {
+    const urlObj = new URL(url);
     return {
       platform: 'xhs' as Platform,
       pageType: 'author_profile' as PageType,
       id: userMatch[1],
-      originalUrl: url
+      originalUrl: url,
+      xsecSource: urlObj.searchParams.get('xsec_source') || undefined,
+      xsecToken: urlObj.searchParams.get('xsec_token') || undefined
     };
   }
 

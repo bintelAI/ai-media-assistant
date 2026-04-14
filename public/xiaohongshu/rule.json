@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/xiaohongshu/vendor-dynamic.js"
+      }
+    },
+    "condition": {
+      "urlFilter": "*://fe-static.xhscdn.com/formula-static/xhs-pc-web/public/resource/js/vendor-dynamic*.js",
+      "initiatorDomains": ["www.xiaohongshu.com"],
+      "resourceTypes": ["script"]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/xiaohongshu/vendor-dynamic.js"
+      }
+    },
+    "condition": {
+      "urlFilter": "*://fe-static.xhscdn.com/formula-static/xhs-pc-web/public/resource/js/vendor.d*.js",
+      "initiatorDomains": ["www.xiaohongshu.com"],
+      "resourceTypes": ["script"]
+    }
+  }
+]

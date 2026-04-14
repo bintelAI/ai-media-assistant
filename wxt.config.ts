@@ -13,7 +13,10 @@ export default defineConfig({
       'storage',
       'sidePanel',
       'tabs',
-      'alarms'
+      'alarms',
+      'cookies',
+      'declarativeNetRequest',
+      'declarativeNetRequestWithHostAccess'
     ],
     host_permissions: [
       'https://www.xiaohongshu.com/*',
@@ -21,7 +24,8 @@ export default defineConfig({
       'https://www.douyin.com/*',
       'https://star.toutiao.com/*',
       'https://www.kuaishou.com/*',
-      'https://www.tiktok.com/*'
+      'https://www.tiktok.com/*',
+      'https://fe-static.xhscdn.com/*'
     ],
     side_panel: {
       default_path: 'sidepanel.html'
@@ -33,19 +37,34 @@ export default defineConfig({
           default: 'Alt+C'
         }
       }
-    }
+    },
+    declarative_net_request: {
+      rule_resources: [
+        {
+          id: 'xiaohongshu',
+          enabled: true,
+          path: 'xiaohongshu/rule.json'
+        }
+      ]
+    },
+    web_accessible_resources: [
+      {
+        resources: ['xiaohongshu/vendor-dynamic.js'],
+        matches: ['*://www.xiaohongshu.com/*']
+      }
+    ]
   },
   srcDir: 'src',
   outDir: 'dist',
-  runner: {
-    chromiumArgs: ['--remote-debugging-port=9222']
-  },
   dev: {
     serverPort: 3000
   },
+  webExt: {
+    startUrl: undefined
+  },
   vite: () => ({
     build: {
-      sourcemap: true,
+      sourcemap: false,
     },
     server: {
       port: 3000,

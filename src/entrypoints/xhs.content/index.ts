@@ -2,14 +2,20 @@ import { sendMessage } from '@/shared/utils/messaging';
 import type { PageType } from '@/shared/types';
 import type { PostEntity, AuthorEntity, CommentEntity } from '@/shared/types/entities';
 
-// 定义自定义事件的数据结构
 interface XHSInterceptEventDetail {
   url: string;
   data: any;
 }
 
+interface XhsApi {
+  fetchUserOtherInfo: (userIds: string[]) => Promise<unknown[]>;
+  generateSign: (path: string, data?: unknown) => { 'X-s': string; 'X-t': string };
+  buildHeaders: (path: string, data?: unknown) => Record<string, string>;
+}
+
 let currentPageType: PageType = 'unknown';
 let injectedUI: HTMLElement | null = null;
+let xhsApi: XhsApi | null = null;
 
 const collectedPosts: Map<string, Partial<PostEntity>> = new Map();
 const collectedAuthors: Map<string, Partial<AuthorEntity>> = new Map();
@@ -18,27 +24,120 @@ const collectedComments: Map<string, Partial<CommentEntity>> = new Map();
 export default defineContentScript({
   matches: ['*://www.xiaohongshu.com/*'],
   runAt: 'document_start',
-  // 默认使用 ISOLATED world，以便正常调用 sendMessage
   
   main() {
     console.log('[智联AI] 小红书 ISOLATED world 桥接脚本已加载');
-    
-    // 注册自定义事件监听，接收来自 MAIN world 拦截器的 CustomEvent
+
     window.addEventListener('zl_xhs_api_intercepted', (e: Event) => {
       const customEvent = e as CustomEvent<XHSInterceptEventDetail>;
       const { url, data } = customEvent.detail;
       handleApiData(url, data);
     });
 
+    window.addEventListener('zl_xhs_api_ready', () => {
+      console.log('[智联AI] MAIN world API 已就绪');
+      xhsApi = (window as any).__ZL_XHS_API__;
+    });
+
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message.type === 'xhs:api:call') {
+        console.log('[智联AI] ISOLATED world 收到消息:', message);
+
+        const requestId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+        let isResponded = false;
+
+        const cleanup = () => {
+          window.removeEventListener('message', handleResponse);
+          window.removeEventListener('message', handleError);
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+        };
+
+        const timeoutId = setTimeout(() => {
+          if (!isResponded) {
+            cleanup();
+            console.error('[智联AI] ISOLATED world: 请求超时');
+            sendResponse({ success: false, error: '请求超时，请刷新页面后重试' });
+            isResponded = true;
+          }
+        }, 30000);
+
+        const handleResponse = (event: MessageEvent) => {
+          if (event.data?.type === 'zl_xhs_api_response' &&
+              event.data?.requestId === requestId &&
+              event.data?.source === 'main') {
+            if (!isResponded) {
+              cleanup();
+              console.log('[智联AI] ISOLATED world 收到响应:', event.data);
+              sendResponse({ success: true, data: event.data.response });
+              isResponded = true;
+            }
+          }
+        };
+
+        const handleError = (event: MessageEvent) => {
+          if (event.data?.type === 'zl_xhs_api_error' &&
+              event.data?.requestId === requestId &&
+              event.data?.source === 'main') {
+            if (!isResponded) {
+              cleanup();
+              console.log('[智联AI] ISOLATED world 收到错误:', event.data);
+              sendResponse({ success: false, error: event.data.error });
+              isResponded = true;
+            }
+          }
+        };
+
+        window.addEventListener('message', handleResponse);
+        window.addEventListener('message', handleError);
+
+        window.postMessage({
+          type: 'zl_xhs_api_request',
+          requestId,
+          source: 'isolated',
+          method: message.method || 'GET',
+          path: message.path,
+          params: message.params
+        }, '*');
+
+        return true;
+      }
+    });
+
     currentPageType = detectXHSPage(window.location.href);
-    
+
     window.addEventListener('load', () => {
       onPageLoaded();
     });
-    
+
     observePageChanges();
   }
 });
+
+/**
+ * 处理来自 background 的 API 调用请求
+ * 使用劫持的小红书原生请求方法
+ */
+async function handleApiCall(path: string, data: Record<string, unknown>): Promise<{ success: boolean; data?: unknown; error?: string }> {
+  try {
+    const xhsRequest = (window as any).__ZL_XHS_REQUEST__;
+
+    if (!xhsRequest) {
+      return { success: false, error: '劫持的请求方法未初始化' };
+    }
+
+    const url = `https://www.xiaohongshu.com${path}`;
+    const response = await xhsRequest('POST', url, data);
+
+    return { success: true, data: response };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'API 调用失败'
+    };
+  }
+}
 
 
 function handleApiData(url: string, data: any) {
@@ -622,10 +721,54 @@ function injectAuthorPageUI() {
     return;
   }
   
-  const { container: buttonContainer, button } = createCollectButton('采集作者', async () => {
+  const buttonsWrapper = document.createElement('div');
+  const shadow = buttonsWrapper.attachShadow({ mode: 'open' });
+  
+  shadow.innerHTML = `
+    <style>
+      .buttons-container {
+        display: inline-flex;
+        gap: 8px;
+        margin-left: 12px;
+      }
+      button {
+        padding: 8px 16px;
+        background: #ff2442;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.2s;
+      }
+      button:hover {
+        background: #e01f3a;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      button.secondary {
+        background: #3b82f6;
+      }
+      button.secondary:hover {
+        background: #2563eb;
+      }
+    </style>
+    <div class="buttons-container">
+      <button id="collectAuthor">采集作者</button>
+      <button id="fetchFromApi" class="secondary">API获取</button>
+    </div>
+  `;
+  
+  const collectAuthorBtn = shadow.querySelector('#collectAuthor') as HTMLButtonElement;
+  const fetchFromApiBtn = shadow.querySelector('#fetchFromApi') as HTMLButtonElement;
+  
+  collectAuthorBtn?.addEventListener('click', async () => {
     try {
-      button.textContent = '采集中...';
-      button.disabled = true;
+      collectAuthorBtn.textContent = '采集中...';
+      collectAuthorBtn.disabled = true;
       
       const authorId = window.location.pathname.split('/').pop();
       const cachedAuthor = authorId ? (collectedAuthors.get(authorId) ?? extractAuthorFromDom(authorId)) : null;
@@ -638,26 +781,105 @@ function injectAuthorPageUI() {
         
         if (response.success) {
           showToast('已保存到本地', 'success');
-          button.textContent = '已采集';
+          collectAuthorBtn.textContent = '已采集';
         } else {
           showToast('采集失败: ' + response.error, 'error');
-          button.textContent = '采集作者';
-          button.disabled = false;
+          collectAuthorBtn.textContent = '采集作者';
+          collectAuthorBtn.disabled = false;
         }
       } else {
         showToast('数据加载中，请稍后重试', 'info');
-        button.textContent = '采集作者';
-        button.disabled = false;
+        collectAuthorBtn.textContent = '采集作者';
+        collectAuthorBtn.disabled = false;
       }
     } catch (e) {
       showToast(`采集异常: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
-      button.textContent = '采集作者';
-      button.disabled = false;
+      collectAuthorBtn.textContent = '采集作者';
+      collectAuthorBtn.disabled = false;
+    }
+  });
+
+  fetchFromApiBtn?.addEventListener('click', async () => {
+    try {
+      fetchFromApiBtn.textContent = '获取中...';
+      fetchFromApiBtn.disabled = true;
+      
+      const authorId = window.location.pathname.split('/').pop();
+      if (!authorId) {
+        showToast('无法获取用户ID', 'error');
+        fetchFromApiBtn.textContent = 'API获取';
+        fetchFromApiBtn.disabled = false;
+        return;
+      }
+
+      const authorData = await fetchUserOtherInfoViaApi(authorId);
+      
+      if (authorData) {
+        const response = await sendMessage('collect:author', {
+          platform: 'xhs',
+          author: authorData
+        });
+        
+        if (response.success) {
+          showToast('已通过API获取并保存', 'success');
+          fetchFromApiBtn.textContent = '已获取';
+          collectedAuthors.set(authorId, authorData);
+        } else {
+          showToast('保存失败: ' + response.error, 'error');
+          fetchFromApiBtn.textContent = 'API获取';
+          fetchFromApiBtn.disabled = false;
+        }
+      } else {
+        showToast('API获取失败，请稍后重试', 'error');
+        fetchFromApiBtn.textContent = 'API获取';
+        fetchFromApiBtn.disabled = false;
+      }
+    } catch (e) {
+      showToast(`获取异常: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
+      fetchFromApiBtn.textContent = 'API获取';
+      fetchFromApiBtn.disabled = false;
     }
   });
   
-  container.appendChild(buttonContainer);
-  injectedUI = buttonContainer;
+  container.appendChild(buttonsWrapper);
+  injectedUI = buttonsWrapper;
+}
+
+/**
+ * 通过 API 获取用户信息
+ * @param userId 用户ID
+ * @returns 用户信息或 null
+ */
+async function fetchUserOtherInfoViaApi(userId: string): Promise<Partial<AuthorEntity> | null> {
+  if (xhsApi) {
+    try {
+      const results = await xhsApi.fetchUserOtherInfo([userId]);
+      if (results && results.length > 0) {
+        const user = results[0] as any;
+        return {
+          platform: 'xhs',
+          authorId: user.userId,
+          name: user.nickname || '',
+          avatar: user.image,
+          profileUrl: `https://www.xiaohongshu.com/user/profile/${user.userId}`,
+          bio: user.desc,
+          fansCount: user.fansCount,
+          followCount: user.followCount,
+          likedCount: user.likedCount,
+          workCount: user.noteCount,
+          location: user.location,
+          verified: !!user.verified,
+          verifiedDesc: user.verifiedInfo?.desc,
+          sourcePageUrl: window.location.href
+        };
+      }
+    } catch (e) {
+      console.error('[智联AI] API 获取用户信息失败:', e);
+    }
+  }
+  
+  const { fetchUserOtherInfo } = await import('@/shared/services/xhs-user-service');
+  return fetchUserOtherInfo(userId);
 }
 
 function extractAuthorFromDom(authorId: string): Partial<AuthorEntity> | null {
