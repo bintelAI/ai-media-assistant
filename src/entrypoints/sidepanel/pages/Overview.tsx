@@ -8,10 +8,10 @@ import {
 import { formatDate, cn } from '@/shared/utils/helpers';
 
 const platforms = [
-  { id: 'pgy', name: '蒲公英', icon: '🌟', color: 'from-yellow-400 to-orange-500' },
-  { id: 'xt', name: '星图', icon: '✈️', color: 'from-blue-400 to-indigo-500' },
-  { id: 'xhs', name: '小红书', icon: '📕', color: 'from-red-400 to-pink-500' },
-  { id: 'dy', name: '抖音', icon: '🎵', color: 'from-gray-800 to-black' }
+  { id: 'pgy', name: '蒲公英', icon: '🌟', color: 'from-yellow-400 to-orange-500', url: 'https://pgy.xiaohongshu.com' },
+  { id: 'xt', name: '星图', icon: '✈️', color: 'from-blue-400 to-indigo-500', url: 'https://star.toutiao.com' },
+  { id: 'xhs', name: '小红书', icon: '📕', color: 'from-red-400 to-pink-500', url: 'https://www.xiaohongshu.com' },
+  { id: 'dy', name: '抖音', icon: '🎵', color: 'from-gray-800 to-black', url: 'https://www.douyin.com' }
 ];
 
 const contactItems = [
@@ -143,6 +143,7 @@ export default function Overview() {
             {platforms.map((platform) => (
               <div
                 key={platform.id}
+                onClick={() => window.open(platform.url, '_blank')}
                 className="flex flex-col items-center gap-2 cursor-pointer group"
               >
                 <div className={cn(
