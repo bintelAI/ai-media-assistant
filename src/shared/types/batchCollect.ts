@@ -11,6 +11,7 @@ export interface ParsedUrl {
   originalUrl: string;
   xsecSource?: string;
   xsecToken?: string;
+  isShortUrl?: boolean;
 }
 
 /**

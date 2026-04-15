@@ -1,4 +1,5 @@
-import { parseUrl } from '@/shared/utils/urlParser';
+import { parseUrl, isXhsShortUrl } from '@/shared/utils/urlParser';
+import { resolveShortUrls, type ShortUrlResolveResult } from '@/shared/services/shortUrlResolver';
 import { addAuthor } from '@/shared/db/authors';
 import { addTask, updateTask } from '@/shared/db/tasks';
 import { fetchUserOtherInfo } from '@/shared/services/xhs-user-service';
@@ -62,14 +63,34 @@ export class BatchCollectManager {
       return;
     }
 
-    const parsedUrls = urls
-      .map(url => parseUrl(url.trim()))
-      .filter((parsed): parsed is ParsedUrl => parsed !== null);
+    console.log('[BatchCollectManager] 检测到短链，开始解析...');
+    const resolveResults = await resolveShortUrls(urls);
+    console.log('[BatchCollectManager] 短链解析完成', resolveResults.length, '个URL');
 
-    if (parsedUrls.length === 0) {
+    const validResolveResults = resolveResults.filter((r): r is ShortUrlResolveResult & { parsed: ParsedUrl } =>
+      r.success && r.parsed !== undefined && r.parsed.id !== ''
+    );
+
+    if (validResolveResults.length === 0) {
       console.warn('[BatchCollectManager] 没有有效的URL');
+      this.progress = {
+        total: urls.length,
+        current: 0,
+        success: 0,
+        failed: urls.length,
+        currentUrl: '',
+        status: 'error',
+        results: urls.map(url => ({
+          success: false,
+          url,
+          error: '无法解析URL'
+        }))
+      };
+      this.notifyProgress();
       return;
     }
+
+    const parsedUrls = validResolveResults.map(r => r.parsed as ParsedUrl);
 
     this.taskQueue = parsedUrls.map(parsed => ({
       url: parsed.originalUrl,

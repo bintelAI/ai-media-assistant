@@ -2,29 +2,73 @@ import type { ParsedUrl } from '../types/batchCollect';
 import type { Platform, PageType } from '../types';
 
 /**
+ * 清理URL字符串
+ * 移除前后的引号、空格等字符（从表格复制时常见）
+ * @param url 原始URL字符串
+ * @returns 清理后的URL字符串
+ */
+export function cleanUrl(url: string): string {
+  let cleaned = url.trim();
+  
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+      (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1);
+  }
+  
+  cleaned = cleaned.trim();
+  
+  return cleaned;
+}
+
+/**
+ * 检测是否为小红书短链
+ * @param url URL字符串
+ * @returns 是否为小红书短链
+ */
+export function isXhsShortUrl(url: string): boolean {
+  try {
+    const cleanedUrl = cleanUrl(url);
+    const urlObj = new URL(cleanedUrl);
+    return urlObj.hostname === 'xhslink.com' || urlObj.hostname === 'www.xhslink.com';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 解析URL识别平台和页面类型
  * @param url 原始URL
  * @returns 解析后的URL信息，无效URL返回null
  */
 export function parseUrl(url: string): ParsedUrl | null {
   try {
-    const trimmedUrl = url.trim();
-    const urlObj = new URL(trimmedUrl);
+    const cleanedUrl = cleanUrl(url);
+    const urlObj = new URL(cleanedUrl);
+
+    if (urlObj.hostname.includes('xhslink.com')) {
+      return {
+        platform: 'xhs' as Platform,
+        pageType: 'unknown' as PageType,
+        id: '',
+        originalUrl: cleanedUrl,
+        isShortUrl: true
+      };
+    }
 
     if (urlObj.hostname.includes('xiaohongshu.com')) {
-      return parseXhsUrl(trimmedUrl);
+      return parseXhsUrl(cleanedUrl);
     }
 
     if (urlObj.hostname.includes('douyin.com')) {
-      return parseDouyinUrl(trimmedUrl);
+      return parseDouyinUrl(cleanedUrl);
     }
 
     if (urlObj.hostname.includes('kuaishou.com')) {
-      return parseKuaishouUrl(trimmedUrl);
+      return parseKuaishouUrl(cleanedUrl);
     }
 
     if (urlObj.hostname.includes('tiktok.com')) {
-      return parseTiktokUrl(trimmedUrl);
+      return parseTiktokUrl(cleanedUrl);
     }
 
     return null;
