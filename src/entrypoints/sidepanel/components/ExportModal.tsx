@@ -63,13 +63,13 @@ export default function ExportModal() {
       
       switch (exportTarget) {
         case 'posts':
-          data = await getPostsData(scope) as Record<string, unknown>[];
+          data = await getPostsData(scope) as unknown as Record<string, unknown>[];
           break;
         case 'authors':
-          data = await getAuthorsData(scope) as Record<string, unknown>[];
+          data = await getAuthorsData(scope) as unknown as Record<string, unknown>[];
           break;
         case 'comments':
-          data = await getCommentsData(scope) as Record<string, unknown>[];
+          data = await getCommentsData(scope) as unknown as Record<string, unknown>[];
           break;
       }
 

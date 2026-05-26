@@ -7,17 +7,18 @@ import DownloadsCenter from './pages/DownloadsCenter';
 import Settings from './pages/Settings';
 import UrlBatchCollect from './pages/UrlBatchCollect';
 import ExportModal from './components/ExportModal';
+import DimensImportModal from './components/DimensImportModal';
 import DetailDrawer from './components/DetailDrawer';
 import TaskDetailDrawer from './components/TaskDetailDrawer';
 import Toast from './components/Toast';
 
 export default function App() {
-  const { currentPage, exportModalOpen, detailDrawerOpen, taskDetailOpen, toastMessage } = useUIStore();
+  const { currentPage, exportModalOpen, dimensImportModalOpen, detailDrawerOpen, taskDetailOpen, toastMessage } = useUIStore();
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       <Navigation />
-      
+
       <main className="flex-1 overflow-hidden">
         {currentPage === 'overview' && <Overview />}
         {currentPage === 'data' && <DataPage />}
@@ -26,8 +27,9 @@ export default function App() {
         {currentPage === 'settings' && <Settings />}
         {currentPage === 'batchCollect' && <UrlBatchCollect />}
       </main>
-      
+
       {exportModalOpen && <ExportModal />}
+      {dimensImportModalOpen && <DimensImportModal />}
       {detailDrawerOpen && <DetailDrawer />}
       {taskDetailOpen && <TaskDetailDrawer />}
       {toastMessage && <Toast />}

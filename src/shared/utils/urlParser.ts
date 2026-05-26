@@ -71,6 +71,10 @@ export function parseUrl(url: string): ParsedUrl | null {
       return parseTiktokUrl(cleanedUrl);
     }
 
+    if (urlObj.hostname.includes('pgy.xiaohongshu.com')) {
+      return parsePgyUrl(cleanedUrl);
+    }
+
     return null;
   } catch (error) {
     return null;
@@ -189,6 +193,50 @@ function parseTiktokUrl(url: string): ParsedUrl | null {
       platform: 'tiktok' as Platform,
       pageType: 'author_profile' as PageType,
       id: userMatch[1],
+      originalUrl: url
+    };
+  }
+
+  return null;
+}
+
+function parsePgyUrl(url: string): ParsedUrl | null {
+  const creatorMatch = url.match(/pgy\.xiaohongshu\.com\/creator\/([\w]+)/);
+  if (creatorMatch) {
+    return {
+      platform: 'pgy' as Platform,
+      pageType: 'author_profile' as PageType,
+      id: creatorMatch[1],
+      originalUrl: url
+    };
+  }
+
+  const userMatch = url.match(/pgy\.xiaohongshu\.com\/user\/([\w]+)/);
+  if (userMatch) {
+    return {
+      platform: 'pgy' as Platform,
+      pageType: 'author_profile' as PageType,
+      id: userMatch[1],
+      originalUrl: url
+    };
+  }
+
+  const noteMatch = url.match(/pgy\.xiaohongshu\.com\/note\/([\w]+)/);
+  if (noteMatch) {
+    return {
+      platform: 'pgy' as Platform,
+      pageType: 'post_detail' as PageType,
+      id: noteMatch[1],
+      originalUrl: url
+    };
+  }
+
+  const videoMatch = url.match(/pgy\.xiaohongshu\.com\/video\/([\w]+)/);
+  if (videoMatch) {
+    return {
+      platform: 'pgy' as Platform,
+      pageType: 'post_detail' as PageType,
+      id: videoMatch[1],
       originalUrl: url
     };
   }

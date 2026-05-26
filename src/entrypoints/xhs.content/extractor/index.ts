@@ -324,9 +324,10 @@ export async function extractComments(): Promise<ExtractResult<CommentEntity[]>>
   }
 }
 
-function extractCommentsFromDOM(): Partial<CommentEntity>[] {
-  const postId = extractPostIdFromUrl(window.location.href);
-  const comments: Partial<CommentEntity>[] = [];
+function extractCommentsFromDOM(): CommentEntity[] {
+  const postId = extractPostIdFromUrl(window.location.href) || '';
+  const now = new Date().toISOString();
+  const comments: CommentEntity[] = [];
   
   const commentEls = document.querySelectorAll('.comment-item, .note-comment .comment');
   
@@ -336,15 +337,21 @@ function extractCommentsFromDOM(): Partial<CommentEntity>[] {
     const likeEl = el.querySelector('.like-count, .comment-like-count');
     const timeEl = el.querySelector('.time, .comment-time');
     
+    const commentId = `${postId || 'unknown'}_comment_${index}`;
+    const content = contentEl?.textContent?.trim() || '';
+
     comments.push({
+      id: `xhs_${commentId}`,
       platform: 'xhs',
-      commentId: `${postId}_comment_${index}`,
+      commentId,
       postId,
       authorName: authorEl?.textContent?.trim(),
-      content: contentEl?.textContent?.trim(),
+      content,
       likeCount: parseChineseNumber(likeEl?.textContent || ''),
       publishTime: timeEl?.textContent?.trim(),
-      sourcePageUrl: window.location.href
+      sourcePageUrl: window.location.href,
+      collectedAt: now,
+      updatedAt: now
     });
   });
   

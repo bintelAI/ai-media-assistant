@@ -1,4 +1,4 @@
-import type { Platform, PageType } from '../types';
+import type { Platform, PageType } from '@/shared/types';
 
 export interface PlatformConfig {
   name: Platform;
@@ -15,14 +15,14 @@ export const PLATFORM_CONFIGS: Record<Platform, PlatformConfig> = {
     domains: ['www.xiaohongshu.com', 'xiaohongshu.com'],
     color: '#ff2442'
   },
-  dy: {
-    name: 'dy',
+  douyin: {
+    name: 'douyin',
     displayName: '抖音',
     domains: ['www.douyin.com', 'douyin.com'],
     color: '#000000'
   },
-  ks: {
-    name: 'ks',
+  kuaishou: {
+    name: 'kuaishou',
     displayName: '快手',
     domains: ['www.kuaishou.com', 'kuaishou.com'],
     color: '#ff4906'
@@ -32,6 +32,18 @@ export const PLATFORM_CONFIGS: Record<Platform, PlatformConfig> = {
     displayName: 'TikTok',
     domains: ['www.tiktok.com', 'tiktok.com'],
     color: '#000000'
+  },
+  pgy: {
+    name: 'pgy',
+    displayName: '蒲公英',
+    domains: ['pgy.xiaohongshu.com'],
+    color: '#ffc107'
+  },
+  xingtu: {
+    name: 'xingtu',
+    displayName: '星图',
+    domains: ['star.toutiao.com', 'www.xingtu.com'],
+    color: '#3b82f6'
   }
 };
 

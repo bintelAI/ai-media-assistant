@@ -1,8 +1,10 @@
 import { parseUrl, isXhsShortUrl } from '@/shared/utils/urlParser';
 import { resolveShortUrls, type ShortUrlResolveResult } from '@/shared/services/shortUrlResolver';
 import { addAuthor } from '@/shared/db/authors';
+import { addPost } from '@/shared/db/posts';
 import { addTask, updateTask } from '@/shared/db/tasks';
 import { fetchUserOtherInfo } from '@/shared/services/xhs-user-service';
+import { fetchPgyCreatorInfo, fetchPgyPostDetail } from '@/shared/services/pgy-user-service';
 import type {
   CollectTask,
   BatchCollectProgress,
@@ -11,13 +13,8 @@ import type {
   ParsedUrl
 } from '@/shared/types/batchCollect';
 import { DEFAULT_BATCH_COLLECT_CONFIG } from '@/shared/types/batchCollect';
-import type { AuthorEntity } from '@/shared/types/entities';
+import type { AuthorEntity, PostEntity } from '@/shared/types/entities';
 
-/**
- * 批量采集任务管理器
- * 负责管理URL批量采集任务队列、进度通知和数据保存
- * 仅支持API直接采集方式
- */
 export class BatchCollectManager {
   private taskQueue: CollectTask[] = [];
   private isRunning: boolean = false;
@@ -28,19 +25,11 @@ export class BatchCollectManager {
   private taskId: string | null = null;
   private abortController: AbortController | null = null;
 
-  /**
-   * 创建批量采集管理器实例
-   * @param config 批量采集配置
-   */
   constructor(config: Partial<BatchCollectConfig> = {}) {
     this.config = { ...DEFAULT_BATCH_COLLECT_CONFIG, ...config };
     this.progress = this.initProgress();
   }
 
-  /**
-   * 初始化进度状态
-   * @returns 初始化的进度对象
-   */
   private initProgress(): BatchCollectProgress {
     return {
       total: 0,
@@ -53,10 +42,6 @@ export class BatchCollectManager {
     };
   }
 
-  /**
-   * 开始批量采集
-   * @param urls 要采集的URL列表
-   */
   async startBatchCollect(urls: string[]): Promise<void> {
     if (this.isRunning) {
       console.warn('[BatchCollectManager] 已有采集任务在运行');
@@ -127,9 +112,6 @@ export class BatchCollectManager {
     await this.processQueue();
   }
 
-  /**
-   * 处理任务队列
-   */
   private async processQueue(): Promise<void> {
     while (this.isRunning && this.currentIndex < this.taskQueue.length) {
       if (this.abortController?.signal.aborted) {
@@ -185,39 +167,36 @@ export class BatchCollectManager {
     await this.completeBatchCollect();
   }
 
-  /**
-   * 执行单个采集任务
-   * 仅支持API直接采集方式
-   * @param task 采集任务
-   * @returns 采集结果
-   */
   private async collectTask(task: CollectTask): Promise<CollectResult> {
-    if (!this.canUseApiCollect(task.parsed)) {
-      return {
-        success: false,
-        url: task.url,
-        error: '不支持的URL类型，仅支持小红书用户主页采集'
-      };
+    const { platform, pageType } = task.parsed;
+
+    if (platform === 'xhs' && pageType === 'author_profile') {
+      return this.collectXhsAuthor(task);
     }
-    return this.collectViaApi(task);
+
+    if (platform === 'pgy' && pageType === 'author_profile') {
+      return this.collectPgyAuthor(task);
+    }
+
+    if (platform === 'pgy' && pageType === 'post_detail') {
+      return this.collectPgyPost(task);
+    }
+
+    return {
+      success: false,
+      url: task.url,
+      error: '不支持的URL类型，目前支持小红书和蒲公英用户主页/帖子详情采集'
+    };
   }
 
-  /**
-   * 判断是否可以使用API直接采集
-   * @param parsed 解析后的URL信息
-   * @returns 是否可以使用API
-   */
   private canUseApiCollect(parsed: ParsedUrl): boolean {
-    return parsed.platform === 'xhs' && parsed.pageType === 'author_profile';
+    return (parsed.platform === 'xhs' && parsed.pageType === 'author_profile') ||
+           (parsed.platform === 'pgy' && parsed.pageType === 'author_profile') ||
+           (parsed.platform === 'pgy' && parsed.pageType === 'post_detail');
   }
 
-  /**
-   * 通过API直接采集（不打开标签页）
-   * @param task 采集任务
-   * @returns 采集结果
-   */
-  private async collectViaApi(task: CollectTask): Promise<CollectResult> {
-    console.log(`[BatchCollectManager] 使用API采集: ${task.url}`);
+  private async collectXhsAuthor(task: CollectTask): Promise<CollectResult> {
+    console.log(`[BatchCollectManager] 使用小红书API采集: ${task.url}`);
 
     try {
       const authorData = await fetchUserOtherInfo(
@@ -225,7 +204,7 @@ export class BatchCollectManager {
         task.parsed.xsecSource,
         task.parsed.xsecToken
       );
-      
+
       if (!authorData) {
         return {
           success: false,
@@ -235,7 +214,7 @@ export class BatchCollectManager {
       }
 
       await addAuthor(authorData as AuthorEntity);
-      
+
       return {
         success: true,
         url: task.url,
@@ -250,14 +229,71 @@ export class BatchCollectManager {
     }
   }
 
-  /**
-   * 完成批量采集
-   */
+  private async collectPgyAuthor(task: CollectTask): Promise<CollectResult> {
+    console.log(`[BatchCollectManager] 使用蒲公英API采集: ${task.url}`);
+
+    try {
+      const authorData = await fetchPgyCreatorInfo(task.parsed.id);
+
+      if (!authorData) {
+        return {
+          success: false,
+          url: task.url,
+          error: '蒲公英API获取用户信息失败'
+        };
+      }
+
+      await addAuthor(authorData as AuthorEntity);
+
+      return {
+        success: true,
+        url: task.url,
+        data: authorData as AuthorEntity
+      };
+    } catch (error) {
+      return {
+        success: false,
+        url: task.url,
+        error: error instanceof Error ? error.message : '蒲公英API采集异常'
+      };
+    }
+  }
+
+  private async collectPgyPost(task: CollectTask): Promise<CollectResult> {
+    console.log(`[BatchCollectManager] 使用蒲公英API采集帖子: ${task.url}`);
+
+    try {
+      const postData = await fetchPgyPostDetail(task.parsed.id);
+
+      if (!postData) {
+        return {
+          success: false,
+          url: task.url,
+          error: '蒲公英API获取帖子详情失败'
+        };
+      }
+
+      await addPost(postData as PostEntity);
+
+      return {
+        success: true,
+        url: task.url,
+        data: postData as PostEntity
+      };
+    } catch (error) {
+      return {
+        success: false,
+        url: task.url,
+        error: error instanceof Error ? error.message : '蒲公英API帖子采集异常'
+      };
+    }
+  }
+
   private async completeBatchCollect(): Promise<void> {
     this.isRunning = false;
     this.isPaused = false;
 
-    const finalStatus = this.progress.failed === 0 ? 'completed' : 
+    const finalStatus = this.progress.failed === 0 ? 'completed' :
       this.progress.success === 0 ? 'error' : 'completed';
 
     this.progress.status = finalStatus as 'completed' | 'error';
@@ -275,9 +311,6 @@ export class BatchCollectManager {
     this.notifyProgress();
   }
 
-  /**
-   * 暂停采集
-   */
   pause(): void {
     if (!this.isRunning) return;
     this.isPaused = true;
@@ -286,9 +319,6 @@ export class BatchCollectManager {
     console.log('[BatchCollectManager] 采集已暂停');
   }
 
-  /**
-   * 继续采集
-   */
   resume(): void {
     if (!this.isRunning || !this.isPaused) return;
     this.isPaused = false;
@@ -297,9 +327,6 @@ export class BatchCollectManager {
     console.log('[BatchCollectManager] 采集已继续');
   }
 
-  /**
-   * 取消采集
-   */
   cancel(): void {
     if (!this.isRunning) return;
 
@@ -320,55 +347,30 @@ export class BatchCollectManager {
     this.notifyProgress();
   }
 
-  /**
-   * 获取当前进度
-   * @returns 当前进度状态
-   */
   getProgress(): BatchCollectProgress {
     return { ...this.progress };
   }
 
-  /**
-   * 获取运行状态
-   * @returns 是否正在运行
-   */
   getIsRunning(): boolean {
     return this.isRunning;
   }
 
-  /**
-   * 获取暂停状态
-   * @returns 是否已暂停
-   */
   getIsPaused(): boolean {
     return this.isPaused;
   }
 
-  /**
-   * 获取随机间隔时间
-   * @returns 随机间隔时间（毫秒）
-   */
   private getRandomInterval(): number {
     const { minInterval, maxInterval } = this.config;
     return Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
   }
 
-  /**
-   * 通知进度更新
-   */
   private notifyProgress(): void {
     chrome.runtime.sendMessage({
       type: 'batch:collect:progress',
       data: { progress: this.progress }
-    }).catch(() => {
-      // 忽略没有监听者的错误
-    });
+    }).catch(() => {});
   }
 
-  /**
-   * 休眠函数
-   * @param ms 休眠时间（毫秒）
-   */
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => {
       const timer = setTimeout(resolve, ms);
@@ -380,7 +382,4 @@ export class BatchCollectManager {
   }
 }
 
-/**
- * 全局批量采集管理器实例
- */
 export const batchCollectManager = new BatchCollectManager();

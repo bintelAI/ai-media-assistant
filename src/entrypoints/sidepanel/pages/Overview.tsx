@@ -9,9 +9,9 @@ import { formatDate, cn } from '@/shared/utils/helpers';
 
 const platforms = [
   { id: 'pgy', name: '蒲公英', icon: '🌟', color: 'from-yellow-400 to-orange-500', url: 'https://pgy.xiaohongshu.com' },
-  { id: 'xt', name: '星图', icon: '✈️', color: 'from-blue-400 to-indigo-500', url: 'https://star.toutiao.com' },
+  { id: 'xingtu', name: '星图', icon: '✈️', color: 'from-blue-400 to-indigo-500', url: 'https://star.toutiao.com' },
   { id: 'xhs', name: '小红书', icon: '📕', color: 'from-red-400 to-pink-500', url: 'https://www.xiaohongshu.com' },
-  { id: 'dy', name: '抖音', icon: '🎵', color: 'from-gray-800 to-black', url: 'https://www.douyin.com' }
+  { id: 'douyin', name: '抖音', icon: '🎵', color: 'from-gray-800 to-black', url: 'https://www.douyin.com' }
 ];
 
 const contactItems = [
@@ -30,7 +30,7 @@ const announcements = [
 
 export default function Overview() {
   const { setCurrentPage, setCurrentDataTab } = useUIStore();
-  const { posts, fetchPosts, countPosts } = usePostsStore();
+  const { posts, fetchPosts } = usePostsStore();
   const { authors, fetchAuthors } = useAuthorsStore();
   const { comments, fetchComments } = useCommentsStore();
   const { tasks, fetchTasks } = useTasksStore();

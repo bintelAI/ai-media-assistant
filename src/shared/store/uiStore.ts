@@ -9,6 +9,8 @@ interface UIState {
   currentDataTab: DataTabType;
   exportModalOpen: boolean;
   exportTarget: ExportTarget | null;
+  dimensImportModalOpen: boolean;
+  dimensImportTarget: ExportTarget | null;
   detailDrawerOpen: boolean;
   detailType: 'post' | 'author' | 'comment' | null;
   detailId: string | null;
@@ -16,11 +18,13 @@ interface UIState {
   taskDetailId: string | null;
   toastMessage: string;
   toastType: 'success' | 'error' | 'info';
-  
+
   setCurrentPage: (page: PageType) => void;
   setCurrentDataTab: (tab: DataTabType) => void;
   openExportModal: (target: ExportTarget) => void;
   closeExportModal: () => void;
+  openDimensImportModal: (target: ExportTarget) => void;
+  closeDimensImportModal: () => void;
   openDetailDrawer: (type: 'post' | 'author' | 'comment', id: string) => void;
   closeDetailDrawer: () => void;
   openTaskDetailDrawer: (id: string) => void;
@@ -34,6 +38,8 @@ export const useUIStore = create<UIState>((set) => ({
   currentDataTab: 'posts',
   exportModalOpen: false,
   exportTarget: null,
+  dimensImportModalOpen: false,
+  dimensImportTarget: null,
   detailDrawerOpen: false,
   detailType: null,
   detailId: null,
@@ -57,7 +63,15 @@ export const useUIStore = create<UIState>((set) => ({
   closeExportModal: () => {
     set({ exportModalOpen: false, exportTarget: null });
   },
-  
+
+  openDimensImportModal: (target) => {
+    set({ dimensImportModalOpen: true, dimensImportTarget: target });
+  },
+
+  closeDimensImportModal: () => {
+    set({ dimensImportModalOpen: false, dimensImportTarget: null });
+  },
+
   openDetailDrawer: (type, id) => {
     set({ detailDrawerOpen: true, detailType: type, detailId: id });
   },

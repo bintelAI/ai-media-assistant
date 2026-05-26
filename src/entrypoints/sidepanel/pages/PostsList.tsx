@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { usePostsStore, useUIStore } from '@/shared/store';
-import { Search, Filter, Download, Trash2, CheckSquare, Square } from 'lucide-react';
+import { Search, Filter, Download, Database, Trash2, CheckSquare, Square } from 'lucide-react';
 import { formatDate, formatNumber, truncate, cn } from '@/shared/utils/helpers';
 import type { PostEntity } from '@/shared/types/entities';
 import type { Platform } from '@/shared/types';
@@ -8,8 +8,10 @@ import type { Platform } from '@/shared/types';
 const platformOptions = [
   { value: '', label: '全部平台' },
   { value: 'xhs', label: '小红书' },
-  { value: 'dy', label: '抖音' },
-  { value: 'ks', label: '快手' }
+  { value: 'douyin', label: '抖音' },
+  { value: 'kuaishou', label: '快手' },
+  { value: 'pgy', label: '蒲公英' },
+  { value: 'xingtu', label: '星图' }
 ];
 
 export default function PostsList() {
@@ -25,7 +27,7 @@ export default function PostsList() {
     deleteSelected,
     setFilters 
   } = usePostsStore();
-  const { openExportModal, openDetailDrawer } = useUIStore();
+  const { openExportModal, openDimensImportModal, openDetailDrawer } = useUIStore();
   
   const [searchKeyword, setSearchKeyword] = useState('');
 
@@ -43,6 +45,10 @@ export default function PostsList() {
 
   const handleExport = () => {
     openExportModal('posts');
+  };
+
+  const handleDimensImport = () => {
+    openDimensImportModal('posts');
   };
 
   const handleDelete = async () => {
@@ -106,6 +112,13 @@ export default function PostsList() {
               <Download className="w-4 h-4" />
               导出
             </button>
+            <button
+              onClick={handleDimensImport}
+              className="flex items-center gap-1 px-3 py-1 bg-emerald-500 text-white rounded-md text-sm hover:bg-emerald-600"
+            >
+              <Database className="w-4 h-4" />
+              入库
+            </button>
             {selectedIds.length > 0 && (
               <button
                 onClick={handleDelete}
@@ -160,9 +173,11 @@ function PostRow({
 }) {
   const platformLabel: Record<Platform, string> = {
     xhs: '小红书',
-    dy: '抖音',
-    ks: '快手',
-    tiktok: 'TikTok'
+    douyin: '抖音',
+    kuaishou: '快手',
+    tiktok: 'TikTok',
+    pgy: '蒲公英',
+    xingtu: '星图'
   };
 
   return (
@@ -197,8 +212,10 @@ function PostRow({
           <span className={cn(
             'text-xs px-1.5 py-0.5 rounded',
             post.platform === 'xhs' ? 'bg-red-100 text-red-600' :
-            post.platform === 'dy' ? 'bg-gray-100 text-gray-600' :
-            post.platform === 'ks' ? 'bg-orange-100 text-orange-600' :
+            post.platform === 'douyin' ? 'bg-gray-100 text-gray-600' :
+            post.platform === 'kuaishou' ? 'bg-orange-100 text-orange-600' :
+            post.platform === 'pgy' ? 'bg-yellow-100 text-yellow-600' :
+            post.platform === 'xingtu' ? 'bg-blue-100 text-blue-600' :
             'bg-gray-100 text-gray-600'
           )}>
             {platformLabel[post.platform]}

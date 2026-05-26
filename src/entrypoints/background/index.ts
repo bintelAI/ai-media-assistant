@@ -1,12 +1,14 @@
 import { onMessage, sendMessage } from '@/shared/utils/messaging';
+import { ChromeStorage } from '@/shared/utils/storage';
 import { initDB } from '@/shared/db';
 import { addPost, updatePost } from '@/shared/db/posts';
 import { addAuthor, updateAuthor } from '@/shared/db/authors';
 import { addComments } from '@/shared/db/comments';
 import { addTask, updateTask } from '@/shared/db/tasks';
 import { batchCollectManager } from './batchCollectManager';
-import type { Message, MessageResponse, BatchCollectStatusResponse } from '@/shared/types/messages';
+import type { Message, MessageResponse, BatchCollectStatusResponse, DimensProxyMessage, DimensAuthChangedMessage } from '@/shared/types/messages';
 import type { PostEntity, AuthorEntity, CommentEntity } from '@/shared/types/entities';
+import { DIMENS_BASE, STORAGE_KEY_AUTH, type DimensAuth } from '@/shared/services/dimens-service';
 
 export default defineBackground(() => {
   console.log('智联AI Background Service Worker started');
@@ -39,6 +41,12 @@ export default defineBackground(() => {
     if (delta.state?.current === 'complete') {
       console.log('Download completed:', delta.id);
     }
+  });
+
+  chrome.cookies.onChanged.addListener((changeInfo) => {
+    handleDimensCookieChanged(changeInfo).catch((error) => {
+      console.error('Dimens cookie change handler error:', error);
+    });
   });
 });
 
@@ -79,7 +87,22 @@ async function handleMessage(
     
     case 'batch:collect:status':
       return handleBatchCollectStatus();
-    
+
+    case 'dimens:proxy':
+      return handleDimensProxy(message.data);
+
+    case 'dimens:me':
+      return handleDimensMe();
+
+    case 'dimens:capture-cookie-token':
+      return handleDimensMe();
+
+    case 'dimens:open-login-page':
+      return handleDimensOpenLoginPage();
+
+    case 'dimens:logout':
+      return handleDimensLogout();
+
     default:
       return { success: false, error: `Unknown message type: ${message.type}` };
   }
@@ -289,6 +312,215 @@ async function handlePageDetected(
 
 const cachedPosts: Map<string, Partial<PostEntity>> = new Map();
 const cachedAuthors: Map<string, Partial<AuthorEntity>> = new Map();
+
+// ==================== Dimens Proxy ====================
+
+const DIMENS_ORIGIN = 'https://dimens.bintelai.com';
+const DIMENS_LOGIN_URL = `${DIMENS_ORIGIN}/login`;
+const DIMENS_COOKIE_TOKEN_NAMES = ['dimens_access_token'];
+const DIMENS_AUTH_REQUIRED = 'DIMENS_AUTH_REQUIRED';
+const DIMENS_ME_PATH = '/app/user/info/person';
+type DimensAuthHeadersResult =
+  | { ok: true; headers: Record<string, string>; cookieName: string }
+  | { ok: false; response: MessageResponse };
+
+function isDimensTokenCookie(cookie: chrome.cookies.Cookie): boolean {
+  return cookie.domain.includes('dimens.bintelai.com') &&
+    DIMENS_COOKIE_TOKEN_NAMES.includes(cookie.name);
+}
+
+function broadcastDimensAuthChanged(data: DimensAuthChangedMessage): void {
+  chrome.runtime.sendMessage({ type: 'dimens:auth-changed', data }).catch(() => undefined);
+}
+
+async function readDimensCookieToken(): Promise<{ token: string; cookieName: string } | null> {
+  for (const name of DIMENS_COOKIE_TOKEN_NAMES) {
+    const cookie = await chrome.cookies.get({
+      name,
+      url: DIMENS_ORIGIN,
+    });
+
+    if (cookie?.value) {
+      return {
+        token: cookie.value,
+        cookieName: name,
+      };
+    }
+  }
+
+  return null;
+}
+
+function isDimensAuthError(status: number, json: any): boolean {
+  return status === 401 ||
+    json?.code === 401 ||
+    json?.code === DIMENS_AUTH_REQUIRED ||
+    json?.message?.includes('未登录') ||
+    json?.message?.includes('Unauthorized') ||
+    json?.message?.includes('token expired');
+}
+
+async function buildDimensAuthHeaders(): Promise<DimensAuthHeadersResult> {
+  const cookieToken = await readDimensCookieToken();
+  if (!cookieToken?.token) {
+    return {
+      ok: false,
+      response: {
+        success: false,
+        code: DIMENS_AUTH_REQUIRED,
+        error: '请先登录维表智联',
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${cookieToken.token}`,
+    },
+    cookieName: cookieToken.cookieName,
+  };
+}
+
+async function handleDimensMe(): Promise<MessageResponse<DimensAuth>> {
+  try {
+    const authHeaders = await buildDimensAuthHeaders();
+    if (!authHeaders.ok) return authHeaders.response as MessageResponse<DimensAuth>;
+
+    const response = await fetch(`${DIMENS_BASE}${DIMENS_ME_PATH}`, {
+      method: 'GET',
+      headers: authHeaders.headers,
+    });
+    const json = await response.json().catch(() => ({}));
+
+    if (!response.ok || json.code !== 1000) {
+      if (isDimensAuthError(response.status, json)) {
+        await ChromeStorage.removeItem(STORAGE_KEY_AUTH);
+        return {
+          success: false,
+          code: DIMENS_AUTH_REQUIRED,
+          error: json.message || '维表登录已失效，请重新登录',
+        };
+      }
+
+      return { success: false, error: json.message || `Me 接口检查失败 (HTTP ${response.status})` };
+    }
+
+    const data = json.data || {};
+    const auth: DimensAuth = {
+      source: 'dimens-cookie',
+      checkedAt: Date.now(),
+      cookieName: authHeaders.cookieName,
+      userInfo: data,
+      teamIds: data.teamIds || data.teams?.map((team: any) => team.id || team.teamId).filter(Boolean) || [],
+    };
+
+    await ChromeStorage.setItem(STORAGE_KEY_AUTH, auth);
+    return { success: true, data: auth };
+  } catch (error: any) {
+    return { success: false, error: error.message || '维表登录状态检查失败' };
+  }
+}
+
+async function checkDimensAuthAndBroadcast(reason: DimensAuthChangedMessage['reason'] = 'manual-refresh'): Promise<void> {
+  broadcastDimensAuthChanged({ status: 'checking', reason });
+  const result = await handleDimensMe();
+
+  if (result.success) {
+    broadcastDimensAuthChanged({
+      status: 'authenticated',
+      userInfo: result.data?.userInfo,
+    });
+  } else {
+    broadcastDimensAuthChanged({
+      status: 'unauthenticated',
+      error: result.error,
+    });
+  }
+}
+
+async function handleDimensCookieChanged(changeInfo: chrome.cookies.CookieChangeInfo): Promise<void> {
+  if (!isDimensTokenCookie(changeInfo.cookie)) return;
+
+  if (changeInfo.removed) {
+    await ChromeStorage.removeItem(STORAGE_KEY_AUTH);
+    broadcastDimensAuthChanged({ status: 'unauthenticated' });
+    return;
+  }
+
+  await checkDimensAuthAndBroadcast('cookie-changed');
+}
+
+async function handleDimensOpenLoginPage(): Promise<MessageResponse> {
+  try {
+    broadcastDimensAuthChanged({ status: 'checking', reason: 'login-page-opened' });
+    await chrome.tabs.create({ url: DIMENS_LOGIN_URL });
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || '打开维表登录页失败' };
+  }
+}
+
+async function handleDimensLogout(): Promise<MessageResponse> {
+  try {
+    for (const name of DIMENS_COOKIE_TOKEN_NAMES) {
+      await chrome.cookies.remove({ name, url: DIMENS_ORIGIN }).catch(() => undefined);
+    }
+    await ChromeStorage.removeItem(STORAGE_KEY_AUTH);
+    broadcastDimensAuthChanged({ status: 'unauthenticated', reason: 'logout' });
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || '退出登录失败' };
+  }
+}
+
+async function handleDimensProxy(data: unknown): Promise<MessageResponse> {
+  try {
+    const { method, path, body, useAuth } = data as DimensProxyMessage;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (useAuth !== false) {
+      const authHeaders = await buildDimensAuthHeaders();
+      if (!authHeaders.ok) return authHeaders.response;
+      Object.assign(headers, authHeaders.headers);
+    }
+
+    const url = `${DIMENS_BASE}${path}`;
+    const fetchOptions: RequestInit = {
+      method: method.toUpperCase(),
+      headers,
+    };
+
+    if (body !== undefined && method.toUpperCase() !== 'GET') {
+      fetchOptions.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(url, fetchOptions);
+    const json = await response.json().catch(() => ({}));
+
+    // API returns { code, message, data } — success when code === 1000
+    if (!response.ok || json.code !== 1000) {
+      if (isDimensAuthError(response.status, json)) {
+        await ChromeStorage.removeItem(STORAGE_KEY_AUTH);
+        broadcastDimensAuthChanged({ status: 'unauthenticated', error: json.message || '维表登录已失效，请重新登录' });
+        return {
+          success: false,
+          code: DIMENS_AUTH_REQUIRED,
+          error: json.message || '维表登录已失效，请重新登录',
+        };
+      }
+      return { success: false, error: json.message || `API错误 (code: ${json.code || response.status})` };
+    }
+
+    return { success: true, data: json };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Dimens请求失败' };
+  }
+}
 
 async function handleCachePosts(data: unknown): Promise<MessageResponse> {
   try {

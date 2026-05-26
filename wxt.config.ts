@@ -22,10 +22,12 @@ export default defineConfig({
       'https://www.xiaohongshu.com/*',
       'https://pgy.xiaohongshu.com/*',
       'https://www.douyin.com/*',
+      'https://lf-douyin-pc-web.douyinstatic.com/*',
       'https://star.toutiao.com/*',
       'https://www.kuaishou.com/*',
       'https://www.tiktok.com/*',
-      'https://fe-static.xhscdn.com/*'
+      'https://fe-static.xhscdn.com/*',
+      'https://dimens.bintelai.com/*'
     ],
     side_panel: {
       default_path: 'sidepanel.html'
@@ -44,6 +46,11 @@ export default defineConfig({
           id: 'xiaohongshu',
           enabled: true,
           path: 'xiaohongshu/rule.json'
+        },
+        {
+          id: 'douyin',
+          enabled: true,
+          path: 'douyin/rule.json'
         }
       ]
     },
@@ -51,6 +58,10 @@ export default defineConfig({
       {
         resources: ['xiaohongshu/vendor-dynamic.js'],
         matches: ['*://www.xiaohongshu.com/*']
+      },
+      {
+        resources: ['douyin/client-entry.js', 'douyin/main-interceptor.js'],
+        matches: ['*://www.douyin.com/*']
       }
     ]
   },

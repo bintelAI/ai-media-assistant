@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthorsStore, useUIStore } from '@/shared/store';
-import { Search, Download, Trash2, CheckSquare, Square } from 'lucide-react';
+import { Search, Download, Database, Trash2, CheckSquare, Square } from 'lucide-react';
 import { formatDate, formatNumber, truncate, cn } from '@/shared/utils/helpers';
 import type { AuthorEntity } from '@/shared/types/entities';
 import type { Platform } from '@/shared/types';
@@ -8,8 +8,10 @@ import type { Platform } from '@/shared/types';
 const platformOptions = [
   { value: '', label: '全部平台' },
   { value: 'xhs', label: '小红书' },
-  { value: 'dy', label: '抖音' },
-  { value: 'ks', label: '快手' }
+  { value: 'douyin', label: '抖音' },
+  { value: 'kuaishou', label: '快手' },
+  { value: 'pgy', label: '蒲公英' },
+  { value: 'xingtu', label: '星图' }
 ];
 
 export default function AuthorsList() {
@@ -25,7 +27,7 @@ export default function AuthorsList() {
     deleteSelected,
     setFilters 
   } = useAuthorsStore();
-  const { openExportModal, openDetailDrawer } = useUIStore();
+  const { openExportModal, openDimensImportModal, openDetailDrawer } = useUIStore();
   
   const [searchKeyword, setSearchKeyword] = useState('');
 
@@ -43,6 +45,10 @@ export default function AuthorsList() {
 
   const handleExport = () => {
     openExportModal('authors');
+  };
+
+  const handleDimensImport = () => {
+    openDimensImportModal('authors');
   };
 
   const handleDelete = async () => {
@@ -106,6 +112,13 @@ export default function AuthorsList() {
               <Download className="w-4 h-4" />
               导出
             </button>
+            <button
+              onClick={handleDimensImport}
+              className="flex items-center gap-1 px-3 py-1 bg-emerald-500 text-white rounded-md text-sm hover:bg-emerald-600"
+            >
+              <Database className="w-4 h-4" />
+              入库
+            </button>
             {selectedIds.length > 0 && (
               <button
                 onClick={handleDelete}
@@ -160,9 +173,11 @@ function AuthorRow({
 }) {
   const platformLabel: Record<Platform, string> = {
     xhs: '小红书',
-    dy: '抖音',
-    ks: '快手',
-    tiktok: 'TikTok'
+    douyin: '抖音',
+    kuaishou: '快手',
+    tiktok: 'TikTok',
+    pgy: '蒲公英',
+    xingtu: '星图'
   };
 
   return (
@@ -197,8 +212,10 @@ function AuthorRow({
           <span className={cn(
             'text-xs px-1.5 py-0.5 rounded',
             author.platform === 'xhs' ? 'bg-red-100 text-red-600' :
-            author.platform === 'dy' ? 'bg-gray-100 text-gray-600' :
-            author.platform === 'ks' ? 'bg-orange-100 text-orange-600' :
+            author.platform === 'douyin' ? 'bg-gray-100 text-gray-600' :
+            author.platform === 'kuaishou' ? 'bg-orange-100 text-orange-600' :
+            author.platform === 'pgy' ? 'bg-yellow-100 text-yellow-600' :
+            author.platform === 'xingtu' ? 'bg-blue-100 text-blue-600' :
             'bg-gray-100 text-gray-600'
           )}>
             {platformLabel[author.platform]}

@@ -27,7 +27,15 @@ export type MessageType =
   | 'batch:collect:start'
   | 'batch:collect:control'
   | 'batch:collect:progress'
-  | 'batch:collect:status';
+  | 'batch:collect:status'
+  | 'xhs:api:call'
+  | 'pgy:api:call'
+  | 'dimens:proxy'
+  | 'dimens:me'
+  | 'dimens:capture-cookie-token'
+  | 'dimens:open-login-page'
+  | 'dimens:logout'
+  | 'dimens:auth-changed';
 
 export interface Message<T = unknown> {
   type: MessageType;
@@ -38,6 +46,7 @@ export interface MessageResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  code?: string;
 }
 
 export interface CollectPostMessage {
@@ -130,4 +139,24 @@ export interface BatchCollectStatusResponse {
   isRunning: boolean;
   isPaused: boolean;
   progress: BatchCollectProgress;
+}
+
+export interface DimensProxyMessage {
+  method: string;
+  path: string;
+  body?: unknown;
+  useAuth?: boolean;
+}
+
+export interface DimensProxyResult {
+  code: number;
+  message: string;
+  data: unknown;
+}
+
+export interface DimensAuthChangedMessage {
+  status: 'checking' | 'authenticated' | 'unauthenticated';
+  reason?: 'login-page-opened' | 'cookie-changed' | 'manual-refresh' | 'startup-check' | 'logout';
+  userInfo?: unknown;
+  error?: string;
 }

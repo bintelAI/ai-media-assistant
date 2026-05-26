@@ -1,30 +1,26 @@
 import { useEffect, useState } from 'react';
 import { useCommentsStore, useUIStore } from '@/shared/store';
-import { Search, Download, Trash2, CheckSquare, Square, ArrowLeft, MessageCircle, ExternalLink } from 'lucide-react';
+import { Search, Download, Database, Trash2, CheckSquare, Square, ArrowLeft, MessageCircle, ExternalLink } from 'lucide-react';
 import { formatDate, truncate, cn } from '@/shared/utils/helpers';
 import type { CommentEntity } from '@/shared/types/entities';
 import type { Platform } from '@/shared/types';
 
 const platformLabel: Record<Platform, string> = {
   xhs: '小红书',
-  dy: '抖音',
-  ks: '快手',
-  tiktok: 'TikTok',
   douyin: '抖音',
   kuaishou: '快手',
+  tiktok: 'TikTok',
   xingtu: '星图',
   pgy: '蒲公英'
 };
 
 const platformColors: Record<Platform, string> = {
   xhs: 'bg-red-100 text-red-600',
-  dy: 'bg-gray-100 text-gray-600',
-  ks: 'bg-orange-100 text-orange-600',
-  tiktok: 'bg-gray-100 text-gray-600',
   douyin: 'bg-gray-100 text-gray-600',
   kuaishou: 'bg-orange-100 text-orange-600',
+  tiktok: 'bg-gray-100 text-gray-600',
   xingtu: 'bg-blue-100 text-blue-600',
-  pgy: 'bg-green-100 text-green-600'
+  pgy: 'bg-yellow-100 text-yellow-600'
 };
 
 export default function CommentsList() {
@@ -44,7 +40,7 @@ export default function CommentsList() {
     setCurrentPostId,
     goBackToList
   } = useCommentsStore();
-  const { openExportModal, openDetailDrawer } = useUIStore();
+  const { openExportModal, openDimensImportModal, openDetailDrawer } = useUIStore();
   
   const [searchKeyword, setSearchKeyword] = useState('');
 
@@ -66,6 +62,10 @@ export default function CommentsList() {
 
   const handleExport = () => {
     openExportModal('comments');
+  };
+
+  const handleDimensImport = () => {
+    openDimensImportModal('comments');
   };
 
   const handleDelete = async () => {
@@ -139,6 +139,13 @@ export default function CommentsList() {
               >
                 <Download className="w-4 h-4" />
                 导出
+              </button>
+              <button
+                onClick={handleDimensImport}
+                className="flex items-center gap-1 px-3 py-1 bg-emerald-500 text-white rounded-md text-sm hover:bg-emerald-600"
+              >
+                <Database className="w-4 h-4" />
+                入库
               </button>
               {selectedIds.length > 0 && (
                 <button
@@ -248,12 +255,12 @@ function PostWithCommentsRow({
       
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          {post?.platform && (
+          {post?.platform && post.platform in platformColors && (
             <span className={cn(
               'text-xs px-1.5 py-0.5 rounded',
-              platformColors[post.platform] || 'bg-gray-100 text-gray-600'
+              platformColors[post.platform as Platform] || 'bg-gray-100 text-gray-600'
             )}>
-              {platformLabel[post.platform] || post.platform}
+              {platformLabel[post.platform as Platform] || post.platform}
             </span>
           )}
           <span className="text-xs text-gray-400">

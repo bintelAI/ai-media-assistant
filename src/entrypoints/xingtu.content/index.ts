@@ -249,7 +249,7 @@ function injectUIByPageType(pageType: PageType) {
 }
 
 function injectPostPageUI() {
-  const container = document.querySelector('.video-info, .video-detail, [class*="video-info"]');
+  const container = document.querySelector<HTMLElement>('.video-info, .video-detail, [class*="video-info"]');
   if (!container) {
     setTimeout(injectPostPageUI, 500);
     return;
@@ -289,7 +289,7 @@ function injectPostPageUI() {
 }
 
 function injectAuthorPageUI() {
-  const container = document.querySelector('.author-info, .user-info, [class*="author-info"]');
+  const container = document.querySelector<HTMLElement>('.author-info, .user-info, [class*="author-info"]');
   if (!container) {
     setTimeout(injectAuthorPageUI, 500);
     return;
@@ -329,7 +329,7 @@ function injectAuthorPageUI() {
 }
 
 function injectListPageUI() {
-  const items = document.querySelectorAll('[class*="video-item"], [class*="author-item"], .list-item');
+  const items = document.querySelectorAll<HTMLElement>('[class*="video-item"], [class*="author-item"], .list-item');
   
   items.forEach((item) => {
     if (item.querySelector('.zl-collect-btn')) return;
@@ -414,39 +414,30 @@ function injectListPageUI() {
   });
 }
 
-function createCollectButton(text: string, onClick: () => void): HTMLElement {
-  const container = document.createElement('div');
-  const shadow = container.attachShadow({ mode: 'open' });
-  
-  shadow.innerHTML = `
-    <style>
-      button {
-        padding: 8px 16px;
-        background: #2196f3;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        transition: all 0.2s;
-        margin-left: 12px;
-      }
-      button:hover {
-        background: #1976d2;
-      }
-      button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-    </style>
-    <button>${text}</button>
+function createCollectButton(text: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.textContent = text;
+  button.style.cssText = `
+    padding: 8px 16px;
+    background: #2196f3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s;
+    margin-left: 12px;
   `;
-  
-  const button = shadow.querySelector('button');
-  button?.addEventListener('click', onClick);
-  
-  return container;
+  button.addEventListener('mouseenter', () => {
+    if (!button.disabled) button.style.background = '#1976d2';
+  });
+  button.addEventListener('mouseleave', () => {
+    button.style.background = '#2196f3';
+  });
+  button.addEventListener('click', onClick);
+
+  return button;
 }
 
 function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {

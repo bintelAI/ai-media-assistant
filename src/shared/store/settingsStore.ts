@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { StorageValue } from 'zustand/middleware';
 import { ChromeStorage } from '../utils/storage';
 import { DEFAULT_SETTINGS } from '../utils/constants';
 import type { ExportFormat } from '../types';
@@ -35,7 +36,7 @@ export const useSettingsStore = create<SettingsState>()(
       name: 'zhi-lian-cai-ji-settings',
       storage: {
         getItem: async (name) => {
-          const value = await ChromeStorage.getItem(name);
+          const value = await ChromeStorage.getItem<StorageValue<SettingsState>>(name);
           return value ?? null;
         },
         setItem: async (name, value) => {

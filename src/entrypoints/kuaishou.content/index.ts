@@ -272,7 +272,7 @@ function injectUIByPageType(pageType: PageType) {
 }
 
 function injectPostPageUI() {
-  const container = document.querySelector('.video-info-wrap, .video-detail-content, #video-info');
+  const container = document.querySelector<HTMLElement>('.video-info-wrap, .video-detail-content, #video-info');
   if (!container) {
     setTimeout(injectPostPageUI, 500);
     return;
@@ -312,7 +312,7 @@ function injectPostPageUI() {
 }
 
 function injectAuthorPageUI() {
-  const container = document.querySelector('.user-info-wrap, .profile-header, #user-info');
+  const container = document.querySelector<HTMLElement>('.user-info-wrap, .profile-header, #user-info');
   if (!container) {
     setTimeout(injectAuthorPageUI, 500);
     return;
@@ -352,7 +352,7 @@ function injectAuthorPageUI() {
 }
 
 function injectListPageUI() {
-  const videos = document.querySelectorAll('.video-item, .feed-item, .item-card');
+  const videos = document.querySelectorAll<HTMLElement>('.video-item, .feed-item, .item-card');
   
   videos.forEach((video) => {
     if (video.querySelector('.zl-collect-btn')) return;
@@ -425,39 +425,30 @@ function injectListPageUI() {
   });
 }
 
-function createCollectButton(text: string, onClick: () => void): HTMLElement {
-  const container = document.createElement('div');
-  const shadow = container.attachShadow({ mode: 'open' });
-  
-  shadow.innerHTML = `
-    <style>
-      button {
-        padding: 8px 16px;
-        background: #ff5f45;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        transition: all 0.2s;
-        margin-left: 12px;
-      }
-      button:hover {
-        background: #e6523b;
-      }
-      button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-    </style>
-    <button>${text}</button>
+function createCollectButton(text: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.textContent = text;
+  button.style.cssText = `
+    padding: 8px 16px;
+    background: #ff5f45;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s;
+    margin-left: 12px;
   `;
-  
-  const button = shadow.querySelector('button');
-  button?.addEventListener('click', onClick);
-  
-  return container;
+  button.addEventListener('mouseenter', () => {
+    if (!button.disabled) button.style.background = '#e6523b';
+  });
+  button.addEventListener('mouseleave', () => {
+    button.style.background = '#ff5f45';
+  });
+  button.addEventListener('click', onClick);
+
+  return button;
 }
 
 function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {

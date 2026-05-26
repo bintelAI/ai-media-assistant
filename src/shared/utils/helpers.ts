@@ -93,13 +93,17 @@ export function extractPostIdFromUrl(url: string, platform: string): string | nu
         const match = urlObj.pathname.match(/\/explore\/([\w]+)/);
         return match ? match[1] : null;
       }
-      case 'dy': {
+      case 'douyin': {
         const match = urlObj.pathname.match(/\/video\/(\d+)/);
         return match ? match[1] : null;
       }
-      case 'ks': {
+      case 'kuaishou': {
         const match = urlObj.pathname.match(/\/short-video\/([\w]+)/);
         return match ? match[1] : null;
+      }
+      case 'pgy': {
+        const match = urlObj.pathname.match(/\/(note|video)\/([\w]+)/);
+        return match ? match[2] : null;
       }
       default:
         return null;
@@ -118,13 +122,17 @@ export function extractAuthorIdFromUrl(url: string, platform: string): string | 
         const match = urlObj.pathname.match(/\/user\/profile\/([\w]+)/);
         return match ? match[1] : null;
       }
-      case 'dy': {
+      case 'douyin': {
         const match = urlObj.pathname.match(/\/user\/([\w]+)/);
         return match ? match[1] : null;
       }
-      case 'ks': {
+      case 'kuaishou': {
         const match = urlObj.pathname.match(/\/profile\/([\w]+)/);
         return match ? match[1] : null;
+      }
+      case 'pgy': {
+        const match = urlObj.pathname.match(/\/(creator|user)\/([\w]+)/);
+        return match ? match[2] : null;
       }
       default:
         return null;
