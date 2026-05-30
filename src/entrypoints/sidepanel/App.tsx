@@ -16,20 +16,21 @@ export default function App() {
   const { currentPage, exportModalOpen, dimensImportModalOpen, detailDrawerOpen, taskDetailOpen, toastMessage } = useUIStore();
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      <Navigation />
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-50 text-slate-900">
+      {currentPage !== 'dimensImport' && <Navigation />}
 
-      <main className="flex-1 overflow-hidden">
+      <main className="min-h-0 flex-1 overflow-hidden">
         {currentPage === 'overview' && <Overview />}
         {currentPage === 'data' && <DataPage />}
         {currentPage === 'tasks' && <TasksCenter />}
         {currentPage === 'downloads' && <DownloadsCenter />}
         {currentPage === 'settings' && <Settings />}
         {currentPage === 'batchCollect' && <UrlBatchCollect />}
+        {currentPage === 'dimensImport' && <DimensImportModal />}
       </main>
 
       {exportModalOpen && <ExportModal />}
-      {dimensImportModalOpen && <DimensImportModal />}
+      {dimensImportModalOpen && currentPage !== 'dimensImport' && <DimensImportModal />}
       {detailDrawerOpen && <DetailDrawer />}
       {taskDetailOpen && <TaskDetailDrawer />}
       {toastMessage && <Toast />}

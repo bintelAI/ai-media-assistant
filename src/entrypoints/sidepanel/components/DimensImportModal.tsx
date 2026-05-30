@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useUIStore, usePostsStore, useAuthorsStore, useCommentsStore } from '@/shared/store';
-import { X, Database, Loader2, CheckCircle2, XCircle, AlertCircle, RefreshCw, Settings2, Plus, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Database, Loader2, CheckCircle2, XCircle, AlertCircle, RefreshCw, Settings2, Plus, ChevronDown } from 'lucide-react';
 import {
   checkAuth,
   checkConnection,
@@ -10,9 +10,11 @@ import {
   DEFAULT_PROJECT_NAME,
   DEFAULT_TEAM_ID,
   ensureColumns,
+  ensureSheetTarget,
   getConfig,
   getProjectInfo,
   getSheetConfig,
+  getSheetViewUrl,
   getTeamIds,
   importRows,
   isAuthenticated,
@@ -20,6 +22,7 @@ import {
   listProjects,
   listSheets,
   onDimensAuthChanged,
+  openDimensAuthorizedPage,
   openDimensLoginPage,
   saveConfig,
   saveSheetTarget,
@@ -34,6 +37,12 @@ export default function DimensImportModal() {
   const { getExportData: getAuthorsData } = useAuthorsStore();
   const { getExportData: getCommentsData } = useCommentsStore();
 
+  useEffect(() => {
+    if (!dimensImportTarget) {
+      closeDimensImportModal();
+    }
+  }, [dimensImportTarget]);
+
   const sheetType: SheetType = dimensImportTarget === 'posts' ? 'posts' : dimensImportTarget === 'authors' ? 'authors' : 'comments';
   const sheetConfig = useMemo(() => getSheetConfig(sheetType), [sheetType]);
   const targetLabel = dimensImportTarget === 'posts' ? '帖子' : dimensImportTarget === 'authors' ? '作者' : '评论';
@@ -41,7 +50,7 @@ export default function DimensImportModal() {
   const [scope, setScope] = useState<'all' | 'filtered' | 'selected'>('selected');
   const [step, setStep] = useState<'checking' | 'credentials' | 'import'>('checking');
   const [importing, setImporting] = useState(false);
-  const [progress, setProgress] = useState({ total: 0, completed: 0, success: 0, created: 0, updated: 0, skipped: 0, failed: 0 });
+  const [progress, setProgress] = useState({ total: 0, completed: 0, success: 0, created: 0, updated: 0, skipped: 0, failed: 0, deduped: 0, dirtySkipped: 0 });
   const [errors, setErrors] = useState<string[]>([]);
   const [status, setStatus] = useState<'idle' | 'preparing' | 'importing' | 'done' | 'error'>('idle');
   const [projectInfo, setProjectInfo] = useState<{ projectId: string; projectName: string } | null>(null);
@@ -63,6 +72,12 @@ export default function DimensImportModal() {
   const [newProjectName, setNewProjectName] = useState('');
   const [newSheetName, setNewSheetName] = useState('');
   const [showNewProject, setShowNewProject] = useState(false);
+  const connectionCardClass =
+    connStatus === 'connected'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+      : connStatus === 'checking'
+        ? 'border-amber-200 bg-amber-50 text-amber-800'
+        : 'border-rose-200 bg-rose-50 text-rose-800';
 
   const loadProjects = async (teamId?: string) => {
     setLoadingProjects(true);
@@ -106,7 +121,6 @@ export default function DimensImportModal() {
     const auth = await checkAuth();
     const tids = await getTeamIds();
     setTeamIds(tids.length > 0 ? tids : auth.teamIds || []);
-    const config = await syncConfigState();
     const conn = await checkConnection();
     if (!conn.ok) {
       setConnStatus('disconnected');
@@ -117,6 +131,7 @@ export default function DimensImportModal() {
 
     const info = await getProjectInfo();
     setProjectInfo(info);
+    const config = await syncConfigState();
     setConnStatus('connected');
     setStep('import');
     await loadProjects(config.teamId);
@@ -293,11 +308,6 @@ export default function DimensImportModal() {
   };
 
   const handleCreateStandardSheet = async () => {
-    if (!currentProjectId) {
-      showToast('请先选择项目', 'error');
-      return;
-    }
-
     try {
       setUpdatingSheet(true);
       setFieldStatus('正在创建标准表...');
@@ -305,7 +315,9 @@ export default function DimensImportModal() {
       setSelectedSheetTarget(target);
       setSelectedSheetId(target.sheetId);
       setNewSheetName('');
-      await loadSheets(currentProjectId);
+      const config = await syncConfigState();
+      await loadProjects(config.teamId);
+      await loadSheets(config.projectId);
       setFieldStatus('标准表已创建并补齐字段');
       showToast('标准表创建成功', 'success');
     } catch (e: any) {
@@ -333,7 +345,7 @@ export default function DimensImportModal() {
     setImporting(true);
     setStatus('preparing');
     setErrors([]);
-    setProgress({ total: 0, completed: 0, success: 0, created: 0, updated: 0, skipped: 0, failed: 0 });
+    setProgress({ total: 0, completed: 0, success: 0, created: 0, updated: 0, skipped: 0, failed: 0, deduped: 0, dirtySkipped: 0 });
 
     try {
       if (!(await isAuthenticated())) {
@@ -351,15 +363,19 @@ export default function DimensImportModal() {
       }
       setProgress(prev => ({ ...prev, total: data.length }));
 
-      setStatus('importing');
-      const target = selectedSheetTarget;
+      let target = selectedSheetTarget;
       if (!target) {
-        setStatus('idle');
-        showToast('请先选择维表目标表后再入库', 'error');
-        return;
+        setFieldStatus('正在使用或创建默认标准表...');
+        target = await ensureSheetTarget(sheetType);
+        setSelectedSheetTarget(target);
+        setSelectedSheetId(target.sheetId);
+        const config = await syncConfigState();
+        await loadProjects(config.teamId);
+        await loadSheets(config.projectId);
       }
       const { sheetId, fieldMapping } = target;
 
+      setStatus('importing');
       const result = await importRows(sheetType, sheetId, fieldMapping, data as Record<string, any>[], (completed, total) => {
         setProgress(prev => ({ ...prev, completed, total }));
       });
@@ -371,6 +387,8 @@ export default function DimensImportModal() {
         updated: result.updated,
         skipped: result.skipped,
         failed: result.failed,
+        deduped: result.deduped,
+        dirtySkipped: result.dirtySkipped,
         completed: data.length,
       }));
       setErrors(result.errors.slice(0, 10));
@@ -394,178 +412,215 @@ export default function DimensImportModal() {
     }
   };
 
+  const handleOpenSheet = async () => {
+    const sheetId = selectedSheetTarget?.sheetId;
+    if (!sheetId) {
+      showToast('未找到目标表，请先确认入库表配置', 'error');
+      return;
+    }
+
+    try {
+      const url = await getSheetViewUrl(sheetId, selectedSheetTarget);
+      await openDimensAuthorizedPage(url);
+    } catch (e: any) {
+      showToast('打开维表失败：' + (e.message || '未知错误'), 'error');
+    }
+  };
+
   if (step === 'checking') {
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg w-[90%] max-w-lg p-6 flex items-center justify-center gap-3">
-          <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
-          <span className="text-sm text-gray-600">正在检查连接状态...</span>
+      <div className="flex h-full flex-col bg-slate-50">
+        <div className="flex h-12 items-center gap-2 border-b border-slate-200 bg-white px-3">
+          <button
+            type="button"
+            onClick={closeDimensImportModal}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            aria-label="返回数据页"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-semibold text-slate-950">{targetLabel}数据入库</h3>
+            <p className="text-[11px] text-slate-500">正在检查维表连接</p>
+          </div>
+        </div>
+        <div className="flex flex-1 items-center justify-center p-4">
+          <div className="flex w-full max-w-sm items-center justify-center gap-3 rounded-lg border border-slate-200 bg-white p-6">
+            <Loader2 className="h-5 w-5 animate-spin text-primary-500" />
+            <span className="text-sm text-slate-600">正在检查连接状态...</span>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg w-[90%] max-w-lg max-h-[90%] overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <Database className="w-5 h-5 text-primary-500" />
-            <h3 className="font-medium">{targetLabel}数据入库 - 维表智联</h3>
+    <div className="flex h-full flex-col bg-slate-50">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+        <div className="border-b border-slate-200 bg-white px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                onClick={closeDimensImportModal}
+                disabled={importing}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
+                aria-label="返回数据页"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold text-slate-950">{targetLabel}数据入库</h3>
+                <p className="mt-0.5 text-xs text-slate-500">写入维表智联，自动补齐项目与标准表</p>
+              </div>
+            </div>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-600">
+              <Database className="h-4 w-4" />
+            </span>
           </div>
-          <button onClick={closeDimensImportModal} disabled={importing} className="p-1 hover:bg-gray-100 rounded">
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
-        <div className="flex-1 overflow-auto p-4 space-y-4">
+        <div className="flex-1 space-y-4 overflow-auto bg-slate-50 p-4">
           {step === 'credentials' ? (
             <>
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-700">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
                 <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
                   <div>
                     <p className="font-medium">请先登录维表智联</p>
-                    <p className="text-xs mt-1">完成网页登录后，插件会通过 Me 接口确认登录状态。</p>
+                    <p className="mt-1 text-xs text-blue-700">完成网页登录后，插件会通过 Me 接口确认登录状态。</p>
                   </div>
                 </div>
               </div>
               <button
                 onClick={handleOpenWebLogin}
                 disabled={connStatus === 'checking'}
-                className="w-full py-2 bg-gray-900 text-white rounded-md text-sm hover:bg-gray-800 disabled:opacity-50"
+                className="flex min-h-[44px] w-full items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-50"
               >
                 {connStatus === 'checking' ? '登录中...' : '登录维表智联'}
               </button>
             </>
           ) : (
             <>
-              <div className={`rounded-md p-3 text-sm ${
-                connStatus === 'connected'
-                  ? 'bg-green-50 border border-green-200 text-green-700'
-                  : connStatus === 'checking'
-                  ? 'bg-yellow-50 border border-yellow-200 text-yellow-700'
-                  : 'bg-red-50 border border-red-200 text-red-700'
-              }`}>
+              <div className={`rounded-lg border p-3 text-sm ${connectionCardClass}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {connStatus === 'connected' ? <CheckCircle2 className="w-4 h-4" /> : connStatus === 'checking' ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
-                    <span>{connStatus === 'connected' ? `已连接 (团队: ${currentTeamId})` : connStatus === 'checking' ? '正在检查连接...' : '连接已断开'}</span>
+                    {connStatus === 'connected' ? <CheckCircle2 className="h-4 w-4" /> : connStatus === 'checking' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                    <span className="font-medium">{connStatus === 'connected' ? `已连接 · ${currentTeamId}` : connStatus === 'checking' ? '正在检查连接...' : '连接已断开'}</span>
                   </div>
                   <div className="flex items-center gap-1">
                     {connStatus !== 'checking' && (
-                      <button onClick={handleReconnect} className="p-1 hover:bg-white/50 rounded" title="重新连接">
-                        <RefreshCw className="w-3.5 h-3.5" />
+                      <button onClick={handleReconnect} className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-white/60" title="重新连接" aria-label="重新连接">
+                        <RefreshCw className="h-3.5 w-3.5" />
                       </button>
                     )}
-                    <button onClick={() => setShowConfig(!showConfig)} className={`p-1 hover:bg-white/50 rounded ${showConfig ? 'bg-white/30' : ''}`} title="切换团队/项目">
-                      <Settings2 className="w-3.5 h-3.5" />
+                    <button onClick={() => setShowConfig(!showConfig)} className={`flex h-8 w-8 items-center justify-center rounded-md hover:bg-white/60 ${showConfig ? 'bg-white/50' : ''}`} title="切换团队/项目" aria-label="切换团队或项目">
+                      <Settings2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>
-                {projectInfo && connStatus === 'connected' && <p className="text-xs mt-1 ml-6">项目: {projectInfo.projectName}</p>}
+                {projectInfo && connStatus === 'connected' && <p className="ml-6 mt-1 text-xs opacity-80">项目: {projectInfo.projectName}</p>}
               </div>
 
               {showConfig && (
-                <div className="border border-gray-200 rounded-md p-3 space-y-3 bg-gray-50">
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/60">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">团队 ID</label>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">团队 ID</label>
                     {teamIds.length > 0 ? (
                       <div className="relative">
-                        <select value={currentTeamId} onChange={(e) => handleTeamChange(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm appearance-none pr-8 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                        <select value={currentTeamId} onChange={(e) => handleTeamChange(e.target.value)} className="min-h-[40px] w-full appearance-none rounded-md border border-slate-300 bg-white px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
                           {teamIds.map((tid) => <option key={tid} value={tid}>{tid}</option>)}
                         </select>
-                        <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       </div>
                     ) : (
-                      <input type="text" value={currentTeamId} onChange={(e) => setCurrentTeamId(e.target.value)} onBlur={() => handleTeamChange(currentTeamId)} placeholder="输入团队ID" className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                      <input type="text" value={currentTeamId} onChange={(e) => setCurrentTeamId(e.target.value)} onBlur={() => handleTeamChange(currentTeamId)} placeholder="输入团队ID" className="min-h-[40px] w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">项目</label>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">项目</label>
                     {loadingProjects ? (
-                      <div className="flex items-center gap-2 text-xs text-gray-500 py-1.5"><Loader2 className="w-3 h-3 animate-spin" />加载项目列表...</div>
+                      <div className="flex items-center gap-2 py-1.5 text-xs text-slate-500"><Loader2 className="h-3 w-3 animate-spin" />加载项目列表...</div>
                     ) : projects.length > 0 ? (
                       <div className="space-y-1.5">
                         <div className="relative">
-                          <select value={currentProjectId} onChange={(e) => handleProjectSelect(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm appearance-none pr-8 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                          <select value={currentProjectId} onChange={(e) => handleProjectSelect(e.target.value)} className="min-h-[40px] w-full appearance-none rounded-md border border-slate-300 bg-white px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
                             <option value="">请选择项目</option>
                             {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                           </select>
-                          <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         </div>
-                        <button onClick={() => setShowNewProject(!showNewProject)} className="flex items-center gap-1 text-xs text-primary-500 hover:text-primary-600">
-                          <Plus className="w-3 h-3" />{showNewProject ? '取消创建' : '创建新项目'}
+                        <button onClick={() => setShowNewProject(!showNewProject)} className="flex min-h-[32px] items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700">
+                          <Plus className="h-3 w-3" />{showNewProject ? '取消创建' : '创建新项目'}
                         </button>
                       </div>
                     ) : (
-                      <p className="text-xs text-gray-400">未找到项目，可创建新项目。</p>
+                      <p className="text-xs text-slate-400">未找到项目，可创建新项目。</p>
                     )}
                   </div>
 
                   {showNewProject && (
                     <div className="flex gap-2">
-                      <input type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} placeholder="新项目名称" className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()} />
-                      <button onClick={handleCreateProject} disabled={!newProjectName.trim()} className="px-3 py-1.5 bg-primary-500 text-white rounded-md text-sm hover:bg-primary-600 disabled:opacity-50">创建</button>
+                      <input type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} placeholder="新项目名称" className="min-h-[40px] flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()} />
+                      <button onClick={handleCreateProject} disabled={!newProjectName.trim()} className="min-h-[40px] rounded-md bg-primary-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50">创建</button>
                     </div>
                   )}
                 </div>
               )}
 
               {connStatus === 'connected' && (
-                <div className="border border-gray-200 rounded-md p-3 space-y-3 bg-gray-50">
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/60">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-medium text-gray-600">目标表</label>
-                    <button type="button" onClick={handleCreateStandardSheet} disabled={!currentProjectId || loadingSheets || updatingSheet} className="flex items-center gap-1 text-xs text-primary-500 hover:text-primary-600 disabled:opacity-50">
-                      <Plus className="w-3 h-3" />创建标准表
+                    <label className="block text-xs font-medium text-slate-600">目标表</label>
+                    <button type="button" onClick={handleCreateStandardSheet} disabled={loadingSheets || updatingSheet} className="flex min-h-[32px] items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 disabled:opacity-50">
+                      <Plus className="h-3 w-3" />创建标准表
                     </button>
                   </div>
                   {loadingSheets ? (
-                    <div className="flex items-center gap-2 text-xs text-gray-500 py-1.5"><Loader2 className="w-3 h-3 animate-spin" />加载表列表...</div>
+                    <div className="flex items-center gap-2 py-1.5 text-xs text-slate-500"><Loader2 className="h-3 w-3 animate-spin" />加载表列表...</div>
                   ) : sheets.length > 0 ? (
                     <div className="relative">
-                      <select value={selectedSheetId} disabled={updatingSheet} onChange={(e) => handleSheetSelect(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm appearance-none pr-8 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50">
+                      <select value={selectedSheetId} disabled={updatingSheet} onChange={(e) => handleSheetSelect(e.target.value)} className="min-h-[40px] w-full appearance-none rounded-md border border-slate-300 bg-white px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50">
                         <option value="">请选择表</option>
                         {selectedSheetTarget && !sheets.some((sheet) => sheet.sheetId === selectedSheetTarget.sheetId) && (
                           <option value={selectedSheetTarget.sheetId}>{selectedSheetTarget.sheetName}</option>
                         )}
                         {sheets.map((sheet) => <option key={sheet.sheetId} value={sheet.sheetId}>{sheet.name}</option>)}
                       </select>
-                      <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     </div>
                   ) : (
-                    <p className="text-xs text-gray-400">当前项目下暂无可选表，可创建标准表。</p>
+                    <p className="text-xs text-slate-400">当前项目下暂无可选表，可创建标准表。</p>
                   )}
                   <input
                     type="text"
                     value={newSheetName}
                     onChange={(e) => setNewSheetName(e.target.value)}
                     placeholder={`新建表名称，默认：${sheetConfig.name}`}
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="min-h-[40px] w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
-                  {selectedSheetId && <button onClick={handleEnsureColumns} disabled={updatingSheet} className="text-xs text-primary-500 hover:text-primary-600 disabled:opacity-50">补齐标准字段</button>}
-                  {fieldStatus && <p className="text-xs text-gray-500">{fieldStatus}</p>}
+                  {selectedSheetId && <button onClick={handleEnsureColumns} disabled={updatingSheet} className="min-h-[32px] text-xs font-medium text-primary-600 hover:text-primary-700 disabled:opacity-50">补齐标准字段</button>}
+                  {fieldStatus && <p className="text-xs text-slate-500">{fieldStatus}</p>}
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium mb-2">导入范围</label>
-                <div className="flex gap-2">
+                <label className="mb-2 block text-sm font-semibold text-slate-900">导入范围</label>
+                <div className="grid grid-cols-3 gap-2">
                   {[
                     { value: 'all', label: '全部数据' },
                     { value: 'filtered', label: '筛选结果' },
                     { value: 'selected', label: '选中数据' },
                   ].map((opt) => (
-                    <button key={opt.value} onClick={() => setScope(opt.value as any)} className={`px-3 py-1.5 text-sm rounded-md ${scope === opt.value ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{opt.label}</button>
+                    <button key={opt.value} onClick={() => setScope(opt.value as any)} className={`min-h-[40px] rounded-md px-2 text-sm font-medium transition-colors ${scope === opt.value ? 'bg-slate-950 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100'}`}>{opt.label}</button>
                   ))}
                 </div>
               </div>
 
-              <div className="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm text-gray-600">
+              <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600 shadow-sm shadow-slate-200/60">
                 <div className="flex items-center gap-2 mb-1">
-                  <Database className="w-4 h-4" />
-                  <span className="font-medium">目标表格</span>
+                  <Database className="h-4 w-4 text-primary-600" />
+                  <span className="font-semibold text-slate-900">目标表格</span>
                 </div>
                 <p className="text-xs mt-1">
                   数据将按主键新增或更新到 <strong>{selectedSheetTarget?.sheetName || sheetConfig.name}</strong>
@@ -574,42 +629,47 @@ export default function DimensImportModal() {
               </div>
 
               {status !== 'idle' && (
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/60">
+                  <div className="text-sm font-semibold text-slate-900">
                     {status === 'preparing' && '正在准备数据表结构...'}
                     {status === 'importing' && `正在入库数据 (${progress.completed}/${progress.total})...`}
                     {status === 'done' && '入库完成'}
                     {status === 'error' && '入库出错'}
                   </div>
                   {status === 'importing' && progress.total > 0 && (
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div className="bg-primary-500 h-2 rounded-full transition-all duration-300" style={{ width: `${(progress.completed / progress.total) * 100}%` }} />
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div className="h-2 rounded-full bg-cyan-500 transition-all duration-300" style={{ width: `${(progress.completed / progress.total) * 100}%` }} />
                     </div>
                   )}
                   {(progress.success > 0 || progress.failed > 0) && (
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                       <span className="flex items-center gap-1 text-green-600"><CheckCircle2 className="w-4 h-4" />新增: {progress.created}</span>
                       <span className="flex items-center gap-1 text-blue-600">更新: {progress.updated}</span>
-                      <span className="flex items-center gap-1 text-gray-500">跳过: {progress.skipped}</span>
+                      <span className="flex items-center gap-1 text-slate-500">跳过: {progress.skipped}</span>
+                      {progress.deduped > 0 && <span className="flex items-center gap-1 text-slate-500">重复: {progress.deduped}</span>}
+                      {progress.dirtySkipped > 0 && <span className="flex items-center gap-1 text-amber-600">无效: {progress.dirtySkipped}</span>}
                       {progress.failed > 0 && <span className="flex items-center gap-1 text-red-600"><XCircle className="w-4 h-4" />失败: {progress.failed}</span>}
                     </div>
                   )}
                   {errors.length > 0 && (
-                    <div className="bg-red-50 border border-red-200 rounded-md p-2 max-h-24 overflow-auto">
+                    <div className="max-h-24 overflow-auto rounded-md border border-red-200 bg-red-50 p-2">
                       {errors.map((err, i) => <p key={i} className="text-xs text-red-600 truncate">{err}</p>)}
                     </div>
                   )}
                 </div>
               )}
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2 pt-1">
                 {status === 'done' ? (
-                  <button onClick={closeDimensImportModal} className="flex-1 py-2 bg-primary-500 text-white rounded-md text-sm hover:bg-primary-600">完成</button>
+                  <>
+                    <button onClick={handleOpenSheet} className="min-h-[44px] flex-1 rounded-md bg-slate-950 px-3 text-sm font-medium text-white hover:bg-slate-800">跳转维表查看</button>
+                    <button onClick={closeDimensImportModal} className="min-h-[44px] flex-1 rounded-md bg-primary-600 px-3 text-sm font-medium text-white hover:bg-primary-700">完成</button>
+                  </>
                 ) : status === 'error' ? (
-                  <button onClick={handleImport} disabled={importing} className="flex-1 py-2 bg-orange-500 text-white rounded-md text-sm hover:bg-orange-600 disabled:opacity-50">重试</button>
+                  <button onClick={handleImport} disabled={importing} className="min-h-[44px] flex-1 rounded-md bg-orange-500 px-3 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">重试</button>
                 ) : (
-                  <button onClick={handleImport} disabled={importing || connStatus !== 'connected'} className="flex-1 py-2 bg-primary-500 text-white rounded-md text-sm hover:bg-primary-600 disabled:opacity-50 flex items-center justify-center gap-2">
-                    {importing ? <><Loader2 className="w-4 h-4 animate-spin" />入库中...</> : <><Database className="w-4 h-4" />开始入库</>}
+                  <button onClick={handleImport} disabled={importing || connStatus !== 'connected'} className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-md bg-primary-600 px-3 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50">
+                    {importing ? <><Loader2 className="h-4 w-4 animate-spin" />入库中...</> : <><Database className="h-4 w-4" />开始入库</>}
                   </button>
                 )}
               </div>

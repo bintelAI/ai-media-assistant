@@ -1,4 +1,6 @@
 import { sendMessage } from '@/shared/utils/messaging';
+import { ChromeStorage } from '@/shared/utils/storage';
+import { SETTINGS_STORAGE_KEY, unwrapStoredSettings, type StoredAppSettings } from '@/shared/utils/constants';
 import type { PageType } from '@/shared/types';
 import type { PostEntity, AuthorEntity } from '@/shared/types/entities';
 
@@ -12,7 +14,13 @@ export default defineContentScript({
   matches: ['*://star.toutiao.com/*'],
   runAt: 'document_start',
   
-  main() {
+  async main() {
+    const state = unwrapStoredSettings(await ChromeStorage.getItem<StoredAppSettings>(SETTINGS_STORAGE_KEY));
+    if (!state?.devMode) {
+      console.info('[智联AI] 星图暂未支持，普通模式不注入采集脚本');
+      return;
+    }
+
     console.log('[智联AI] 星图 Content Script 已加载');
     
     setupXhrInterceptor();

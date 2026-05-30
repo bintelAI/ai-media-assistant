@@ -12,6 +12,11 @@ const PAGE_UI_SELECTOR = `.${PAGE_UI_CLASS}`;
 const collectedPosts: Map<string, Partial<PostEntity>> = new Map();
 const collectedAuthors: Map<string, Partial<AuthorEntity>> = new Map();
 
+interface DouyinAuthorPathInfo {
+  id: string;
+  isSecUid: boolean;
+}
+
 /** 注入 MAIN world 脚本实现 fetch/XHR 拦截（ISOLATED world 无法拦截页面自身的 fetch）
  *  使用扩展文件 URL 而非内联代码，以绕过抖音 CSP 对内联脚本的限制 */
 function injectMainWorldInterceptor() {
@@ -143,18 +148,47 @@ function handleSearchData(data: any) {
 }
 
 function handleUserData(data: any) {
-  const user = data?.user || data?.data?.user;
-  if (!user?.uid) return;
+  const user = data?.user || data?.data?.user || data?.user_info || data?.data?.user_info;
+  const authorId = getAuthorPrimaryId(user);
+  if (!authorId) return;
 
   const authorData = extractAuthorData(user);
   if (authorData) {
-    collectedAuthors.set(user.uid, authorData);
+    cacheAuthorAliases(user, authorData);
     sendMessage('cache:author', { author: authorData });
-    console.log(`[智联AI] 抖音缓存用户: ${user.uid} - ${authorData.name}`);
+    console.log(`[智联AI] 抖音缓存用户: ${authorId} - ${authorData.name}`);
   }
 }
 
 // ==================== 数据提取 ====================
+
+function getAuthorPrimaryId(user: any): string {
+  return String(user?.uid || user?.id || user?.user_id || user?.sec_uid || user?.secUid || '').trim();
+}
+
+function getAuthorAliasIds(user: any): string[] {
+  const ids = [
+    user?.uid,
+    user?.id,
+    user?.user_id,
+    user?.sec_uid,
+    user?.secUid,
+    user?.unique_id,
+    user?.uniqueId,
+    user?.short_id,
+    user?.shortId,
+    user?.web_rid,
+    user?.webRid,
+  ];
+  return Array.from(new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)));
+}
+
+function cacheAuthorAliases(user: any, authorData: Partial<AuthorEntity>) {
+  const aliases = getAuthorAliasIds(user);
+  for (const alias of aliases) {
+    collectedAuthors.set(alias, authorData);
+  }
+}
 
 function extractPostData(aweme: any): Partial<PostEntity> | null {
   if (!aweme?.aweme_id) return null;
@@ -190,14 +224,17 @@ function extractPostData(aweme: any): Partial<PostEntity> | null {
 }
 
 function extractAuthorData(user: any): Partial<AuthorEntity> | null {
-  if (!user?.uid) return null;
+  const authorId = getAuthorPrimaryId(user);
+  if (!authorId) return null;
+  const secUid = user.sec_uid || user.secUid;
+  const profilePathId = secUid || authorId;
 
   return {
     platform: 'douyin',
-    authorId: user.uid,
+    authorId,
     name: user.nickname || user.name || '',
     avatar: user.avatar_medium?.url_list?.[0] || user.avatar_thumb?.url_list?.[0] || user.avatar_url,
-    profileUrl: `https://www.douyin.com/user/${user.uid}`,
+    profileUrl: `https://www.douyin.com/user/${profilePathId}`,
     bio: user.signature,
     fansCount: user.follower_count,
     followCount: user.following_count,
@@ -409,12 +446,12 @@ function injectAuthorPageUI() {
     (button as HTMLButtonElement).disabled = true;
 
     // 尝试从当前 URL 或缓存中获取作者 ID
-    const pathParts = window.location.pathname.split('/');
-    const authorIdFromPath = pathParts[pathParts.length - 1];
+    const authorPath = getDouyinAuthorPathInfo();
+    const authorIdFromPath = authorPath?.id;
     const cachedAuthor = authorIdFromPath ? collectedAuthors.get(authorIdFromPath) : null;
 
     // 兜底：从 DOM 中提取
-    const author = cachedAuthor || extractAuthorFromDOM(authorIdFromPath);
+    const author = cachedAuthor || extractAuthorFromDOM(authorPath);
 
     if (author) {
       const response = await sendMessage('collect:author', {
@@ -443,11 +480,30 @@ function injectAuthorPageUI() {
   injectedUI = button;
 }
 
-function extractAuthorFromDOM(authorId?: string): Partial<AuthorEntity> | null {
-  if (!authorId) return null;
+function getDouyinAuthorPathInfo(url = window.location.href): DouyinAuthorPathInfo | null {
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(/\/user\/([^/?#]+)/);
+    const authorId = match?.[1]?.trim();
+    if (!authorId) return null;
+    const decoded = decodeURIComponent(authorId);
+    return { id: decoded, isSecUid: decoded.startsWith('MS4w') };
+  } catch {
+    return null;
+  }
+}
+
+function extractAuthorFromDOM(authorPath?: DouyinAuthorPathInfo | null): Partial<AuthorEntity> | null {
+  if (!authorPath?.id) return null;
 
   const nameEl = document.querySelector('[data-e2e="user-name"], .nickname, .user-name');
   const avatarEl = document.querySelector('[data-e2e="user-avatar"] img, .avatar img') as HTMLImageElement;
+  const name = nameEl?.textContent?.trim() || '';
+  const avatar = avatarEl?.src || '';
+
+  if (authorPath.isSecUid || (!name && !avatar)) {
+    return null;
+  }
 
   const statsEls = document.querySelectorAll('[data-e2e="user-stats"] span, .stats span, .count');
   const statsTexts = Array.from(statsEls).map(el => el.textContent || '');
@@ -461,9 +517,10 @@ function extractAuthorFromDOM(authorId?: string): Partial<AuthorEntity> | null {
 
   return {
     platform: 'douyin',
-    authorId,
-    name: nameEl?.textContent?.trim() || '',
-    avatar: avatarEl?.src,
+    authorId: authorPath.id,
+    name,
+    avatar,
+    profileUrl: `https://www.douyin.com/user/${authorPath.id}`,
     fansCount: extractNum(statsTexts[0] || ''),
     followCount: extractNum(statsTexts[1] || ''),
     sourcePageUrl: window.location.href

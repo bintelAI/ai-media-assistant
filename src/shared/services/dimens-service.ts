@@ -31,6 +31,9 @@ export interface DimensConfig {
 export interface DimensSheetTarget {
   sheetId: string;
   sheetName: string;
+  teamId?: string;
+  projectId?: string;
+  projectName?: string;
   fieldMapping: Record<string, string>;
   upsertKeys: string[];
   checkedAt: number;
@@ -52,6 +55,7 @@ export interface DimensColumn {
   fieldId: string;
   label: string;
   type: string;
+  config?: Record<string, any>;
 }
 
 interface DimensRow {
@@ -66,41 +70,78 @@ export interface DimensImportResult {
   updated: number;
   skipped: number;
   failed: number;
+  deduped: number;
+  dirtySkipped: number;
   errors: string[];
+}
+
+interface SelectOption {
+  id: string;
+  label: string;
+  color: string;
+}
+
+interface SheetColumnConfig {
+  label: string;
+  type: string;
+  key: string;
+  options?: SelectOption[];
 }
 
 interface SheetConfig {
   name: string;
   primaryKeys: string[];
-  columns: { label: string; type: string; key: string }[];
+  columns: SheetColumnConfig[];
 }
+
+const PLATFORM_OPTIONS: SelectOption[] = [
+  { id: 'xhs', label: '小红书', color: 'bg-rose-100 text-rose-700' },
+  { id: 'douyin', label: '抖音', color: 'bg-slate-100 text-slate-700' },
+  { id: 'kuaishou', label: '快手', color: 'bg-emerald-100 text-emerald-700' },
+  { id: 'xingtu', label: '星图', color: 'bg-blue-100 text-blue-700' },
+  { id: 'pgy', label: '蒲公英', color: 'bg-violet-100 text-violet-700' },
+  { id: 'tiktok', label: 'TikTok', color: 'bg-zinc-100 text-zinc-700' },
+];
+
+const POST_TYPE_OPTIONS: SelectOption[] = [
+  { id: 'video', label: '视频', color: 'bg-blue-100 text-blue-700' },
+  { id: 'image', label: '图文', color: 'bg-emerald-100 text-emerald-700' },
+  { id: 'mixed', label: '图文/视频', color: 'bg-violet-100 text-violet-700' },
+  { id: 'text', label: '文本', color: 'bg-slate-100 text-slate-700' },
+];
+
+const GENDER_OPTIONS: SelectOption[] = [
+  { id: 'male', label: '男', color: 'bg-blue-100 text-blue-700' },
+  { id: 'female', label: '女', color: 'bg-rose-100 text-rose-700' },
+  { id: 'unknown', label: '未知', color: 'bg-slate-100 text-slate-700' },
+];
 
 const SHEET_CONFIGS: Record<SheetType, SheetConfig> = {
   posts: {
     name: '帖子数据',
     primaryKeys: ['platform', 'postId'],
     columns: [
-      { label: '平台', type: 'text', key: 'platform' },
+      { label: '平台', type: 'select', key: 'platform', options: PLATFORM_OPTIONS },
       { label: '帖子ID', type: 'text', key: 'postId' },
-      { label: '内容类型', type: 'text', key: 'postType' },
+      { label: '内容类型', type: 'select', key: 'postType', options: POST_TYPE_OPTIONS },
       { label: '标题', type: 'text', key: 'title' },
       { label: '内容描述', type: 'text', key: 'content' },
-      { label: '帖子链接', type: 'text', key: 'url' },
-      { label: '封面图', type: 'text', key: 'coverUrl' },
-      { label: '发布时间', type: 'text', key: 'publishTime' },
+      { label: '帖子链接', type: 'url', key: 'url' },
+      { label: '封面图', type: 'url', key: 'coverUrl' },
+      { label: '发布时间', type: 'date', key: 'publishTime' },
       { label: '作者ID', type: 'text', key: 'authorId' },
       { label: '作者昵称', type: 'text', key: 'authorName' },
-      { label: '作者主页链接', type: 'text', key: 'authorUrl' },
-      { label: '点赞数', type: 'text', key: 'likeCount' },
-      { label: '评论数', type: 'text', key: 'commentCount' },
-      { label: '收藏数', type: 'text', key: 'collectCount' },
-      { label: '分享数', type: 'text', key: 'shareCount' },
-      { label: '播放数', type: 'text', key: 'viewCount' },
-      { label: '媒体数量', type: 'text', key: 'mediaCount' },
+      { label: '作者主页链接', type: 'url', key: 'authorUrl' },
+      { label: '点赞数', type: 'number', key: 'likeCount' },
+      { label: '评论数', type: 'number', key: 'commentCount' },
+      { label: '收藏数', type: 'number', key: 'collectCount' },
+      { label: '分享数', type: 'number', key: 'shareCount' },
+      { label: '播放数', type: 'number', key: 'viewCount' },
+      { label: '媒体数量', type: 'number', key: 'mediaCount' },
       { label: '标签', type: 'text', key: 'tags' },
-      { label: '来源页面', type: 'text', key: 'sourcePageUrl' },
-      { label: '采集时间', type: 'text', key: 'collectedAt' },
-      { label: '更新时间', type: 'text', key: 'updatedAt' },
+      { label: '来源页面', type: 'url', key: 'sourcePageUrl' },
+      { label: '采集时间', type: 'date', key: 'collectedAt' },
+      { label: '更新时间', type: 'date', key: 'updatedAt' },
       { label: '备注', type: 'text', key: 'note' },
     ],
   },
@@ -108,24 +149,24 @@ const SHEET_CONFIGS: Record<SheetType, SheetConfig> = {
     name: '作者数据',
     primaryKeys: ['platform', 'authorId'],
     columns: [
-      { label: '平台', type: 'text', key: 'platform' },
+      { label: '平台', type: 'select', key: 'platform', options: PLATFORM_OPTIONS },
       { label: '作者ID', type: 'text', key: 'authorId' },
       { label: '昵称', type: 'text', key: 'name' },
-      { label: '头像', type: 'text', key: 'avatar' },
-      { label: '主页链接', type: 'text', key: 'profileUrl' },
+      { label: '头像', type: 'url', key: 'avatar' },
+      { label: '主页链接', type: 'url', key: 'profileUrl' },
       { label: '简介', type: 'text', key: 'bio' },
-      { label: '粉丝数', type: 'text', key: 'fansCount' },
-      { label: '关注数', type: 'text', key: 'followCount' },
-      { label: '获赞数', type: 'text', key: 'likedCount' },
-      { label: '作品数', type: 'text', key: 'workCount' },
+      { label: '粉丝数', type: 'number', key: 'fansCount' },
+      { label: '关注数', type: 'number', key: 'followCount' },
+      { label: '获赞数', type: 'number', key: 'likedCount' },
+      { label: '作品数', type: 'number', key: 'workCount' },
       { label: '地区', type: 'text', key: 'location' },
-      { label: '性别', type: 'text', key: 'gender' },
-      { label: '是否认证', type: 'text', key: 'verified' },
+      { label: '性别', type: 'select', key: 'gender', options: GENDER_OPTIONS },
+      { label: '是否认证', type: 'checkbox', key: 'verified' },
       { label: '认证说明', type: 'text', key: 'verifiedDesc' },
       { label: '联系方式', type: 'text', key: 'contactInfo' },
-      { label: '来源页面', type: 'text', key: 'sourcePageUrl' },
-      { label: '采集时间', type: 'text', key: 'collectedAt' },
-      { label: '更新时间', type: 'text', key: 'updatedAt' },
+      { label: '来源页面', type: 'url', key: 'sourcePageUrl' },
+      { label: '采集时间', type: 'date', key: 'collectedAt' },
+      { label: '更新时间', type: 'date', key: 'updatedAt' },
       { label: '备注', type: 'text', key: 'note' },
     ],
   },
@@ -133,18 +174,18 @@ const SHEET_CONFIGS: Record<SheetType, SheetConfig> = {
     name: '评论数据',
     primaryKeys: ['platform', 'commentId'],
     columns: [
-      { label: '平台', type: 'text', key: 'platform' },
+      { label: '平台', type: 'select', key: 'platform', options: PLATFORM_OPTIONS },
       { label: '评论ID', type: 'text', key: 'commentId' },
       { label: '所属帖子ID', type: 'text', key: 'postId' },
       { label: '所属帖子标题', type: 'text', key: 'postTitle' },
       { label: '评论用户ID', type: 'text', key: 'authorId' },
       { label: '评论用户昵称', type: 'text', key: 'authorName' },
       { label: '评论内容', type: 'text', key: 'content' },
-      { label: '点赞数', type: 'text', key: 'likeCount' },
-      { label: '回复数', type: 'text', key: 'replyCount' },
-      { label: '发布时间', type: 'text', key: 'publishTime' },
-      { label: '来源页面', type: 'text', key: 'sourcePageUrl' },
-      { label: '采集时间', type: 'text', key: 'collectedAt' },
+      { label: '点赞数', type: 'number', key: 'likeCount' },
+      { label: '回复数', type: 'number', key: 'replyCount' },
+      { label: '发布时间', type: 'date', key: 'publishTime' },
+      { label: '来源页面', type: 'url', key: 'sourcePageUrl' },
+      { label: '采集时间', type: 'date', key: 'collectedAt' },
     ],
   },
 };
@@ -225,6 +266,13 @@ export async function openDimensLoginPage(): Promise<void> {
   }
 }
 
+export async function openDimensAuthorizedPage(url: string): Promise<void> {
+  const response = await sendMessage('dimens:open-authorized-page', { url });
+  if (!response.success) {
+    throw new Error(response.error || '打开维表页面失败');
+  }
+}
+
 export async function logout(): Promise<void> {
   const response = await sendMessage('dimens:logout');
   if (!response.success) {
@@ -264,6 +312,17 @@ export function getSheetTypePrimaryKeys(sheetType: SheetType): string[] {
   return SHEET_CONFIGS[sheetType].primaryKeys;
 }
 
+function pickList(result: any, keys: string[] = []): any[] {
+  const data = result?.data ?? result ?? {};
+  if (Array.isArray(data)) return data;
+
+  for (const key of [...keys, 'list', 'records', 'rows', 'items']) {
+    if (Array.isArray(data[key])) return data[key];
+  }
+
+  return [];
+}
+
 export async function listProjects(teamId?: string): Promise<DimensProject[]> {
   const config = await getConfig();
   const tid = teamId || config.teamId;
@@ -271,11 +330,11 @@ export async function listProjects(teamId?: string): Promise<DimensProject[]> {
     page: 1,
     size: 50,
   });
-  const list = result.data?.list || result.data || [];
+  const list = pickList(result, ['projects']);
   return (Array.isArray(list) ? list : []).map((p: any) => ({
-    id: p.id,
-    name: p.name,
-  }));
+    id: p.id || p.projectId,
+    name: p.name || p.projectName || p.title,
+  })).filter((p) => p.id && p.name);
 }
 
 async function findProject(teamId?: string, projectName?: string): Promise<DimensProject | null> {
@@ -313,12 +372,29 @@ async function createProject(teamId?: string, projectName?: string): Promise<Dim
     projectType: 'spreadsheet',
   });
   const data = result.data || result;
-  return { id: data.id, name: data.name || pname };
+  return {
+    id: data.id || data.projectId || data.project?.id || data.project?.projectId,
+    name: data.name || data.projectName || data.project?.name || data.project?.projectName || pname,
+  };
 }
 
 async function ensureProject(): Promise<string> {
   const config = await getConfig();
-  if (config.projectId) return config.projectId;
+  const previousProjectId = config.projectId;
+  if (config.projectId) {
+    try {
+      const projects = await listProjects(config.teamId);
+      const project = projects.find((p) => p.id === config.projectId);
+      if (project) {
+        if (project.name !== config.projectName) {
+          await saveConfig({ ...config, projectName: project.name });
+        }
+        return project.id;
+      }
+    } catch {
+      return config.projectId;
+    }
+  }
 
   let project = await findProject(config.teamId, config.projectName);
   if (!project) {
@@ -329,42 +405,56 @@ async function ensureProject(): Promise<string> {
     ...config,
     projectId: project.id,
     projectName: project.name,
+    sheetTargets: previousProjectId && previousProjectId !== project.id ? {} : config.sheetTargets,
   });
   return project.id;
 }
 
 export async function listSheets(projectId: string): Promise<DimensSheet[]> {
   const result = await proxyRequest('GET', `/app/mul/project/${projectId}/sheet/list`);
-  const list = result.data || result || [];
-  return (Array.isArray(list) ? list : [])
+  const list = pickList(result, ['sheets']);
+  return list
     .filter((s: any) => s.type === 'sheet' || !s.type)
     .map((s: any) => ({
       sheetId: s.sheetId || s.id,
-      name: s.name || '',
+      name: s.name || s.sheetName || s.title || '',
       type: s.type || 'sheet',
       columns: s.config?.columns
         ?.filter((c: any) => !(c.fieldId || c.id || '').startsWith('__system'))
-        .map((c: any) => ({ fieldId: c.fieldId || c.id, label: c.label || c.title || '', type: c.type || 'text' })) || [],
+        .map((c: any) => ({
+          fieldId: c.fieldId || c.id,
+          label: c.label || c.title || '',
+          type: c.type || 'text',
+          config: c.config || c.property || {},
+        })) || [],
     }));
 }
 
 async function createSheet(projectId: string, name: string): Promise<string> {
   const result = await proxyRequest('POST', `/app/mul/project/${projectId}/sheet/create`, { name });
   const data = result.data || result;
-  return data.id || data.sheetId;
+  const sheetId = data.id || data.sheetId || data.sheet?.id || data.sheet?.sheetId;
+  if (!sheetId) {
+    throw new Error('标准表创建成功但未返回 sheetId');
+  }
+  return sheetId;
 }
 
 async function createColumn(
   teamId: string,
   projectId: string,
   sheetId: string,
-  label: string,
-  type: string
+  column: SheetColumnConfig
 ): Promise<string> {
+  const body: Record<string, any> = { label: column.label, type: column.type };
+  if (column.options?.length) {
+    body.config = { options: column.options };
+  }
+
   const result = await proxyRequest(
     'POST',
     `/app/mul/${teamId}/${projectId}/sheet/${sheetId}/column/create`,
-    { label, type }
+    body
   );
   const data = result.data || result;
   return data.id || data.fieldId;
@@ -375,12 +465,13 @@ export async function listColumns(teamId: string, projectId: string, sheetId: st
     'GET',
     `/app/mul/${teamId}/${projectId}/sheet/${sheetId}/column/list`
   );
-  return (result.data || result || [])
+  return pickList(result, ['columns', 'fields'])
     .filter((c: any) => !(c.id || c.fieldId || '').startsWith('__system'))
     .map((c: any) => ({
       fieldId: c.id || c.fieldId,
-      label: c.label || c.title || '',
+      label: c.label || c.title || c.name || '',
       type: c.type || 'text',
+      config: c.config || c.property || {},
     }));
 }
 
@@ -418,7 +509,7 @@ export async function ensureColumns(
     if (existing) continue;
 
     try {
-      const fieldId = await createColumn(teamId, projectId, sheetId, colConfig.label, colConfig.type);
+      const fieldId = await createColumn(teamId, projectId, sheetId, colConfig);
       if (fieldId) {
         columns = [...columns, { fieldId, label: colConfig.label, type: colConfig.type }];
       }
@@ -448,22 +539,26 @@ export async function ensureColumns(
 
 export async function saveSheetTarget(sheetType: SheetType, sheet: DimensSheet): Promise<DimensSheetTarget> {
   const config = await getConfig();
-  const projectId = config.projectId || await getConfiguredProjectId();
-  const columns = await listColumns(config.teamId, projectId, sheet.sheetId);
+  const projectId = config.projectId || await ensureProject();
+  const latestConfig = await getConfig();
+  const columns = await listColumns(latestConfig.teamId, projectId, sheet.sheetId);
   const fieldMapping = buildFieldMapping(columns, sheetType);
   const target: DimensSheetTarget = {
     sheetId: sheet.sheetId,
     sheetName: sheet.name,
+    teamId: latestConfig.teamId,
+    projectId,
+    projectName: latestConfig.projectName || DEFAULT_PROJECT_NAME,
     fieldMapping,
     upsertKeys: SHEET_CONFIGS[sheetType].primaryKeys,
     checkedAt: Date.now(),
   };
 
   await saveConfig({
-    ...config,
+    ...latestConfig,
     projectId,
     sheetTargets: {
-      ...(config.sheetTargets || {}),
+      ...(latestConfig.sheetTargets || {}),
       [sheetType]: target,
     },
   });
@@ -482,8 +577,8 @@ export async function clearSheetTarget(sheetType: SheetType): Promise<void> {
 }
 
 export async function createStandardSheetForType(sheetType: SheetType, sheetName?: string): Promise<DimensSheetTarget> {
+  const projectId = await ensureProject();
   const config = await getConfig();
-  const projectId = await getConfiguredProjectId();
   const sheetConfig = SHEET_CONFIGS[sheetType];
   const name = sheetName?.trim() || sheetConfig.name;
   const sheetId = await createSheet(projectId, name);
@@ -495,6 +590,55 @@ export async function createStandardSheetForType(sheetType: SheetType, sheetName
   const target: DimensSheetTarget = {
     sheetId,
     sheetName: name,
+    teamId: config.teamId,
+    projectId,
+    projectName: config.projectName || DEFAULT_PROJECT_NAME,
+    fieldMapping: ensured.fieldMapping,
+    upsertKeys: sheetConfig.primaryKeys,
+    checkedAt: Date.now(),
+  };
+
+  await saveConfig({
+    ...config,
+    projectId,
+    sheetTargets: {
+      ...(config.sheetTargets || {}),
+      [sheetType]: target,
+    },
+  });
+
+  return target;
+}
+
+export async function ensureSheetTarget(sheetType: SheetType): Promise<DimensSheetTarget> {
+  const projectId = await ensureProject();
+  const config = await getConfig();
+  const sheetConfig = SHEET_CONFIGS[sheetType];
+  const configured = config.sheetTargets?.[sheetType];
+  const sheets = await listSheets(projectId);
+
+  let sheet = configured?.sheetId
+    ? sheets.find((item) => item.sheetId === configured.sheetId)
+    : undefined;
+
+  if (!sheet) {
+    sheet = sheets.find((item) => item.name === sheetConfig.name);
+  }
+
+  const sheetId = sheet?.sheetId || await createSheet(projectId, sheetConfig.name);
+  const sheetName = sheet?.name || sheetConfig.name;
+
+  const ensured = await ensureColumns(config.teamId, projectId, sheetId, sheetType);
+  if (ensured.missing.length > 0) {
+    throw new Error(formatColumnEnsureError('目标表缺少字段', ensured.missing, ensured.errors));
+  }
+
+  const target: DimensSheetTarget = {
+    sheetId,
+    sheetName,
+    teamId: config.teamId,
+    projectId,
+    projectName: config.projectName || DEFAULT_PROJECT_NAME,
     fieldMapping: ensured.fieldMapping,
     upsertKeys: sheetConfig.primaryKeys,
     checkedAt: Date.now(),
@@ -513,24 +657,52 @@ export async function createStandardSheetForType(sheetType: SheetType, sheetName
 }
 
 export async function ensureSheet(sheetType: SheetType): Promise<{ sheetId: string; fieldMapping: Record<string, string> }> {
-  const config = await getConfig();
-  const projectId = config.projectId || await ensureProject();
-  const sheetConfig = SHEET_CONFIGS[sheetType];
-  const configured = config.sheetTargets?.[sheetType];
+  const target = await ensureSheetTarget(sheetType);
+  return { sheetId: target.sheetId, fieldMapping: target.fieldMapping };
+}
 
-  let sheetId = configured?.sheetId;
-  if (!sheetId) {
-    const sheets = await listSheets(projectId);
-    const sheet = sheets.find((s) => s.name === sheetConfig.name);
-    sheetId = sheet?.sheetId || await createSheet(projectId, sheetConfig.name);
+function getColumnConfigByKey(sheetType: SheetType, key: string): SheetColumnConfig | undefined {
+  return SHEET_CONFIGS[sheetType].columns.find((column) => column.key === key);
+}
+
+function normalizeString(value: any): string {
+  return String(value ?? '').trim();
+}
+
+function normalizeOptionValue(value: any, options: SelectOption[]): string {
+  const raw = normalizeString(value);
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  const option = options.find((item) => item.id.toLowerCase() === lower || item.label === raw);
+  return option?.id || raw;
+}
+
+function formatOptionLabel(value: any, options: SelectOption[]): string {
+  const raw = normalizeString(value);
+  if (!raw) return '';
+  const normalized = normalizeOptionValue(raw, options);
+  return options.find((item) => item.id === normalized)?.label || raw;
+}
+
+function canonicalizeFieldValue(key: string, value: any): string {
+  if (key === 'platform') return normalizeOptionValue(value, PLATFORM_OPTIONS);
+  if (key === 'postType') return normalizeOptionValue(value, POST_TYPE_OPTIONS);
+  if (key === 'gender') return normalizeOptionValue(value, GENDER_OPTIONS);
+  return normalizeString(value);
+}
+
+function formatFieldValueForDimens(sheetType: SheetType, key: string, value: any): any {
+  const column = getColumnConfigByKey(sheetType, key);
+  if (column?.options?.length) {
+    return formatOptionLabel(value, column.options);
   }
+  return value;
+}
 
-  const ensured = await ensureColumns(config.teamId, projectId, sheetId, sheetType);
-  if (ensured.missing.length > 0) {
-    throw new Error(formatColumnEnsureError('目标表缺少字段', ensured.missing, ensured.errors));
-  }
-
-  return { sheetId, fieldMapping: ensured.fieldMapping };
+function isEmptyDimensValue(value: any): boolean {
+  if (value === undefined || value === null || value === '') return true;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
 }
 
 function normalizeValueForCreate(value: any): any {
@@ -548,15 +720,17 @@ function normalizeValueForUpdate(value: any): any {
 }
 
 function mapRowData(
+  sheetType: SheetType,
   item: Record<string, any>,
   fieldMapping: Record<string, string>,
   mode: 'create' | 'update'
 ): Record<string, any> {
   const rowData: Record<string, any> = {};
   for (const [key, fieldId] of Object.entries(fieldMapping)) {
+    const formattedValue = formatFieldValueForDimens(sheetType, key, item[key]);
     const value = mode === 'create'
-      ? normalizeValueForCreate(item[key])
-      : normalizeValueForUpdate(item[key]);
+      ? normalizeValueForCreate(formattedValue)
+      : normalizeValueForUpdate(formattedValue);
     if (value !== undefined) {
       rowData[fieldId] = value;
     }
@@ -566,24 +740,89 @@ function mapRowData(
 
 function buildBusinessKey(item: Record<string, any>, sheetType: SheetType): string | null {
   const keys = SHEET_CONFIGS[sheetType].primaryKeys;
-  const values = keys.map((key) => item[key]);
-  if (values.some((value) => value === undefined || value === null || value === '')) return null;
-  return values.map(String).join('::');
+  const values = keys.map((key) => canonicalizeFieldValue(key, item[key]));
+  if (values.some((value) => !value)) return null;
+  return values.join('::');
 }
 
 function parseRows(result: any): any[] {
-  const data = result.data || result || {};
-  const list = data.list || data.rows || data.records || data;
-  return Array.isArray(list) ? list : [];
+  const candidates = [
+    result,
+    result?.data,
+    result?.data?.data,
+    result?.data?.page,
+    result?.page,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+    if (!candidate || typeof candidate !== 'object') continue;
+    for (const key of ['list', 'rows', 'records', 'items']) {
+      if (Array.isArray(candidate[key])) return candidate[key];
+    }
+  }
+
+  return [];
+}
+
+function normalizeCellArray(cells: any[]): Record<string, any> {
+  const data: Record<string, any> = {};
+  for (const cell of cells) {
+    const fieldId = cell?.fieldId || cell?.columnId || cell?.id || cell?.key;
+    if (!fieldId) continue;
+    data[fieldId] = cell.value ?? cell.text ?? cell.label ?? cell.data ?? '';
+  }
+  return data;
 }
 
 function normalizeDimensRow(row: any): DimensRow {
-  const rowData = row.data || row.values || {};
+  const rawData = row.data || row.values || row.fields || row.record || {};
+  const rowData = Array.isArray(row.cells)
+    ? { ...rawData, ...normalizeCellArray(row.cells) }
+    : rawData;
+  const rowId = row.rowId || row.id || row._id || rowData.rowId || rowData.id;
   return {
-    rowId: row.rowId || row.id || rowData.id,
-    data: rowData,
-    version: row.version ?? rowData.version,
+    rowId: rowId || '',
+    data: rowData || {},
+    version: row.version ?? rowData.version ?? row.baseVersion,
   };
+}
+
+function getRemoteFieldValue(row: DimensRow, fieldId: string): any {
+  const value = row.data?.[fieldId];
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value.label ?? value.value ?? value.text ?? value.id ?? '';
+  }
+  return value;
+}
+
+function rowMatchesBusinessKey(
+  row: DimensRow,
+  sheetType: SheetType,
+  fieldMapping: Record<string, string>,
+  item: Record<string, any>
+): boolean {
+  return SHEET_CONFIGS[sheetType].primaryKeys.every((key) => {
+    const fieldId = fieldMapping[key];
+    if (!fieldId) return false;
+    const expected = canonicalizeFieldValue(key, item[key]);
+    const actual = canonicalizeFieldValue(key, getRemoteFieldValue(row, fieldId));
+    return expected !== '' && expected === actual;
+  });
+}
+
+async function rowPage(
+  teamId: string,
+  projectId: string,
+  sheetId: string,
+  body: Record<string, any>
+): Promise<DimensRow[]> {
+  const result = await proxyRequest(
+    'POST',
+    `/app/mul/${teamId}/${projectId}/sheet/${sheetId}/row/page`,
+    body
+  );
+  return parseRows(result).map(normalizeDimensRow).filter((row) => row.rowId);
 }
 
 async function findExistingRowByKey(
@@ -594,28 +833,84 @@ async function findExistingRowByKey(
   fieldMapping: Record<string, string>,
   item: Record<string, any>
 ): Promise<DimensRow | null> {
-  const filters = SHEET_CONFIGS[sheetType].primaryKeys.map((key) => ({
-    fieldId: fieldMapping[key],
-    operator: 'equals',
-    value: item[key],
-  }));
-
-  if (filters.some((filter) => !filter.fieldId || filter.value === undefined || filter.value === null || filter.value === '')) {
+  const primaryKeys = SHEET_CONFIGS[sheetType].primaryKeys;
+  const idKey = primaryKeys.find((key) => key !== 'platform') || primaryKeys[0];
+  const idFieldId = fieldMapping[idKey];
+  const idValue = item[idKey];
+  if (!idFieldId || idValue === undefined || idValue === null || idValue === '') {
     return null;
   }
 
-  const result = await proxyRequest(
-    'POST',
-    `/app/mul/${teamId}/${projectId}/sheet/${sheetId}/row/page`,
+  const queryBodies = [
     {
       page: 1,
-      size: 2,
-      filters,
+      size: 20,
+      filters: [{ fieldId: idFieldId, operator: 'equals', value: idValue }],
       filterMatchType: 'and',
+    },
+    {
+      page: 1,
+      size: 20,
+      filters: primaryKeys.map((key) => ({
+        fieldId: fieldMapping[key],
+        operator: 'equals',
+        value: formatFieldValueForDimens(sheetType, key, item[key]),
+      })),
+      filterMatchType: 'and',
+    },
+  ];
+
+  for (const body of queryBodies) {
+    if (body.filters.some((filter) => !filter.fieldId || isEmptyDimensValue(filter.value))) continue;
+    const rows = await rowPage(teamId, projectId, sheetId, body);
+    const match = rows.find((row) => rowMatchesBusinessKey(row, sheetType, fieldMapping, item));
+    if (match) return match;
+  }
+
+  return null;
+}
+
+function buildBusinessKeyFromRow(
+  row: DimensRow,
+  sheetType: SheetType,
+  fieldMapping: Record<string, string>
+): string | null {
+  const item: Record<string, any> = {};
+  for (const key of SHEET_CONFIGS[sheetType].primaryKeys) {
+    const fieldId = fieldMapping[key];
+    item[key] = fieldId ? getRemoteFieldValue(row, fieldId) : '';
+  }
+  return buildBusinessKey(item, sheetType);
+}
+
+async function buildRemoteRowIndex(
+  teamId: string,
+  projectId: string,
+  sheetId: string,
+  sheetType: SheetType,
+  fieldMapping: Record<string, string>
+): Promise<Map<string, DimensRow>> {
+  const index = new Map<string, DimensRow>();
+  const pageSize = 100;
+  const maxPages = 10;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const rows = await rowPage(teamId, projectId, sheetId, {
+      page,
+      size: pageSize,
+    });
+
+    for (const row of rows) {
+      const businessKey = buildBusinessKeyFromRow(row, sheetType, fieldMapping);
+      if (businessKey && !index.has(businessKey)) {
+        index.set(businessKey, row);
+      }
     }
-  );
-  const rows = parseRows(result);
-  return rows.length > 0 ? normalizeDimensRow(rows[0]) : null;
+
+    if (rows.length < pageSize) break;
+  }
+
+  return index;
 }
 
 async function createRow(sheetId: string, data: Record<string, any>): Promise<void> {
@@ -661,10 +956,13 @@ async function updateRow(
 }
 
 function mergeRowData(existing: Record<string, any>, updates: Record<string, any>): Record<string, any> {
-  return {
-    ...existing,
-    ...updates,
-  };
+  const merged = { ...existing };
+  for (const [fieldId, value] of Object.entries(updates)) {
+    if (!isEmptyDimensValue(value)) {
+      merged[fieldId] = value;
+    }
+  }
+  return merged;
 }
 
 export async function importRows(
@@ -675,7 +973,8 @@ export async function importRows(
   onProgress?: (completed: number, total: number) => void
 ): Promise<DimensImportResult> {
   const config = await getConfig();
-  const projectId = config.projectId || await getConfiguredProjectId();
+  const projectId = config.projectId || await ensureProject();
+  const latestConfig = await getConfig();
   const missingKeys = SHEET_CONFIGS[sheetType].primaryKeys.filter((key) => !fieldMapping[key]);
   if (missingKeys.length > 0) {
     throw new Error(`目标表缺少 Upsert 主键字段映射：${missingKeys.join('、')}`);
@@ -685,31 +984,58 @@ export async function importRows(
   let updated = 0;
   let skipped = 0;
   let failed = 0;
+  let deduped = 0;
+  let dirtySkipped = 0;
   const errors: string[] = [];
+  const processedKeys = new Set<string>();
+  const rowCache = new Map<string, DimensRow | null>();
+  let remoteRowIndex: Map<string, DimensRow> | null = null;
 
   for (let index = 0; index < data.length; index += 1) {
     const item = data[index];
     const businessKey = buildBusinessKey(item, sheetType);
     if (!businessKey) {
       skipped += 1;
+      dirtySkipped += 1;
       errors.push(`第 ${index + 1} 条缺少主键字段，已跳过`);
       onProgress?.(index + 1, data.length);
       continue;
     }
 
+    if (processedKeys.has(businessKey)) {
+      skipped += 1;
+      deduped += 1;
+      errors.push(`${businessKey}: 同批次重复数据，已跳过`);
+      onProgress?.(index + 1, data.length);
+      continue;
+    }
+    processedKeys.add(businessKey);
+
     try {
-      const existing = await findExistingRowByKey(config.teamId, projectId, sheetId, sheetType, fieldMapping, item);
-      if (existing) {
-        const updates = mapRowData(item, fieldMapping, 'update');
+      const existing = rowCache.has(businessKey)
+        ? rowCache.get(businessKey) || null
+        : await findExistingRowByKey(latestConfig.teamId, projectId, sheetId, sheetType, fieldMapping, item);
+      let matchedRow = existing;
+      if (!matchedRow) {
+        if (!remoteRowIndex) {
+          remoteRowIndex = await buildRemoteRowIndex(latestConfig.teamId, projectId, sheetId, sheetType, fieldMapping);
+        }
+        matchedRow = remoteRowIndex.get(businessKey) || null;
+      }
+      rowCache.set(businessKey, matchedRow);
+
+      if (matchedRow) {
+        const updates = mapRowData(sheetType, item, fieldMapping, 'update');
         if (Object.keys(updates).length === 0) {
           skipped += 1;
         } else {
-          await updateRow(config.teamId, projectId, sheetId, existing, updates);
+          await updateRow(latestConfig.teamId, projectId, sheetId, matchedRow, updates);
           updated += 1;
         }
       } else {
-        await createRow(sheetId, mapRowData(item, fieldMapping, 'create'));
+        await createRow(sheetId, mapRowData(sheetType, item, fieldMapping, 'create'));
         created += 1;
+        remoteRowIndex?.set(businessKey, { rowId: '', data: {}, version: undefined });
       }
     } catch (e: any) {
       failed += 1;
@@ -725,6 +1051,8 @@ export async function importRows(
     updated,
     skipped,
     failed,
+    deduped,
+    dirtySkipped,
     errors,
   };
 }
@@ -759,12 +1087,26 @@ export async function checkConnection(): Promise<{ ok: boolean; message: string 
 
 export async function getProjectInfo(): Promise<{ projectId: string; projectName: string } | null> {
   try {
+    const projectId = await ensureProject();
     const config = await getConfig();
-    const projectId = await getConfiguredProjectId();
     return { projectId, projectName: config.projectName || DEFAULT_PROJECT_NAME };
   } catch {
     return null;
   }
+}
+
+export async function getSheetViewUrl(sheetId: string, target?: Partial<DimensSheetTarget>): Promise<string> {
+  const config = await getConfig();
+  const projectId = target?.projectId || config.projectId || await ensureProject();
+  const latestConfig = await getConfig();
+  const teamId = target?.teamId || latestConfig.teamId;
+  if (!target?.projectId || !target?.teamId) {
+    const sheets = await listSheets(projectId);
+    if (!sheets.some((sheet) => sheet.sheetId === sheetId)) {
+      throw new Error('目标表不属于当前项目，请重新选择目标表后再打开');
+    }
+  }
+  return `https://dimens.bintelai.com/#/${teamId}/${projectId}/${sheetId}`;
 }
 
 export async function createNewProject(name: string): Promise<DimensProject> {

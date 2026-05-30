@@ -4,7 +4,13 @@ export default defineContentScript({
   world: 'MAIN',
 
   main() {
-    console.log('[智联AI] 蒲公英 MAIN world API 脚本已加载');
+    let booted = false;
+
+    const boot = () => {
+      if (booted) return;
+      booted = true;
+
+      console.log('[智联AI] 蒲公英 MAIN world API 脚本已加载');
 
     const PGY_BASE_URL = 'https://pgy.xiaohongshu.com';
     const CUSTOM_BASE64_CHARS = 'A4NjFqYu5wPHsO0XTdDgMa2r1ZQocVte9UJBvk6/7=yRnhISGKblCWi+LpfE8xzm3';
@@ -346,6 +352,12 @@ export default defineContentScript({
       }
     });
 
-    console.log('[智联AI] 蒲公英 MAIN world API 脚本已就绪');
+      console.log('[智联AI] 蒲公英 MAIN world API 脚本已就绪');
+    };
+
+    window.addEventListener('zl_pgy_dev_mode_enabled', boot, { once: true });
+    if (document.documentElement.dataset.zlPgyDevMode === 'true') {
+      boot();
+    }
   }
 });

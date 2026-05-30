@@ -3,17 +3,18 @@
 @tailwind utilities;
 
 :root {
-  --primary-color: #3b82f6;
+  --primary-color: #2563eb;
   --xhs-color: #ff2442;
   --douyin-color: #000000;
   --kuaishou-color: #ff4906;
   --success-color: #22c55e;
   --warning-color: #f59e0b;
   --error-color: #ef4444;
-  --border-color: #e5e7eb;
-  --bg-color: #ffffff;
-  --text-color: #1f2937;
-  --text-secondary: #6b7280;
+  --border-color: #dbe3ee;
+  --bg-color: #f8fafc;
+  --surface-color: #ffffff;
+  --text-color: #172033;
+  --text-secondary: #64748b;
 }
 
 * {
@@ -29,9 +30,19 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: var(--text-color);
-  background-color: var(--bg-color);
+  background: #f8fafc;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  touch-action: manipulation;
 }
 
 ::-webkit-scrollbar {
@@ -44,16 +55,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: #cbd5e1;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #94a3b8;
 }
 
 .btn {
-  @apply inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-colors duration-200;
+  @apply inline-flex min-h-[44px] items-center justify-center rounded-md px-4 py-2 font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2;
 }
 
 .btn-primary {
@@ -69,11 +80,11 @@ body {
 }
 
 .card {
-  @apply bg-white rounded-lg border border-gray-200 shadow-sm;
+  @apply rounded-lg border border-slate-200 bg-white;
 }
 
 .input {
-  @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  @apply w-full min-h-[40px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500;
 }
 
 .badge {

@@ -2,17 +2,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { StorageValue } from 'zustand/middleware';
 import { ChromeStorage } from '../utils/storage';
-import { DEFAULT_SETTINGS } from '../utils/constants';
-import type { ExportFormat } from '../types';
+import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY, type AppSettings } from '../utils/constants';
 
-interface Settings {
-  defaultExportFormat: ExportFormat;
-  autoDedupe: boolean;
-  autoOpenSidePanel: boolean;
-  taskConcurrency: number;
-  retryCount: number;
-  downloadNamingRule: string;
-}
+type Settings = AppSettings;
 
 interface SettingsState extends Settings {
   updateSettings: (settings: Partial<Settings>) => void;
@@ -33,7 +25,7 @@ export const useSettingsStore = create<SettingsState>()(
       }
     }),
     {
-      name: 'zhi-lian-cai-ji-settings',
+      name: SETTINGS_STORAGE_KEY,
       storage: {
         getItem: async (name) => {
           const value = await ChromeStorage.getItem<StorageValue<SettingsState>>(name);

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { ExportTarget } from '../types';
 
-type PageType = 'overview' | 'data' | 'tasks' | 'downloads' | 'settings' | 'batchCollect';
+type PageType = 'overview' | 'data' | 'tasks' | 'downloads' | 'settings' | 'batchCollect' | 'dimensImport';
 type DataTabType = 'posts' | 'authors' | 'comments' | 'media';
 
 interface UIState {
@@ -65,11 +65,11 @@ export const useUIStore = create<UIState>((set) => ({
   },
 
   openDimensImportModal: (target) => {
-    set({ dimensImportModalOpen: true, dimensImportTarget: target });
+    set({ currentPage: 'dimensImport', dimensImportModalOpen: false, dimensImportTarget: target });
   },
 
   closeDimensImportModal: () => {
-    set({ dimensImportModalOpen: false, dimensImportTarget: null });
+    set({ currentPage: 'data', dimensImportModalOpen: false, dimensImportTarget: null });
   },
 
   openDetailDrawer: (type, id) => {

@@ -13,6 +13,26 @@ export interface AuthorQueryOptions {
   orderDirection?: 'asc' | 'desc';
 }
 
+function isMeaningfulAuthorValue(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function mergeAuthorEntity(
+  existing: AuthorEntity,
+  incoming: Omit<AuthorEntity, 'id' | 'collectedAt' | 'updatedAt'>,
+  updatedAt: string
+): AuthorEntity {
+  const merged: AuthorEntity = { ...existing, updatedAt };
+  for (const [key, value] of Object.entries(incoming) as [keyof typeof incoming, any][]) {
+    if (isMeaningfulAuthorValue(value)) {
+      (merged as any)[key] = value;
+    }
+  }
+  return merged;
+}
+
 export async function addAuthor(author: Omit<AuthorEntity, 'id' | 'collectedAt' | 'updatedAt'>): Promise<string> {
   const db = await getDB();
   
@@ -21,11 +41,7 @@ export async function addAuthor(author: Omit<AuthorEntity, 'id' | 'collectedAt' 
   const now = new Date().toISOString();
   
   if (existing) {
-    const updated: AuthorEntity = {
-      ...existing,
-      ...author,
-      updatedAt: now
-    };
+    const updated = mergeAuthorEntity(existing, author, now);
     await db.put('authors', updated);
     return existing.id;
   }

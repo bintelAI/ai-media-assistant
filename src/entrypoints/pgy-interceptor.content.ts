@@ -4,7 +4,13 @@ export default defineContentScript({
   world: 'MAIN',
 
   main() {
-    console.log('[智联AI] 蒲公英 MAIN world 拦截器已启动');
+    let booted = false;
+
+    const boot = () => {
+      if (booted) return;
+      booted = true;
+
+      console.log('[智联AI] 蒲公英 MAIN world 拦截器已启动');
 
     const dataApis = [
       '/api/creator/',
@@ -95,6 +101,12 @@ export default defineContentScript({
       return response;
     };
 
-    console.log('[智联AI] 蒲公英 MAIN world XHR+Fetch 拦截器已设置');
+      console.log('[智联AI] 蒲公英 MAIN world XHR+Fetch 拦截器已设置');
+    };
+
+    window.addEventListener('zl_pgy_dev_mode_enabled', boot, { once: true });
+    if (document.documentElement.dataset.zlPgyDevMode === 'true') {
+      boot();
+    }
   }
 });

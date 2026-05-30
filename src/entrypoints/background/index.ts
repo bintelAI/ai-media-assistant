@@ -6,7 +6,7 @@ import { addAuthor, updateAuthor } from '@/shared/db/authors';
 import { addComments } from '@/shared/db/comments';
 import { addTask, updateTask } from '@/shared/db/tasks';
 import { batchCollectManager } from './batchCollectManager';
-import type { Message, MessageResponse, BatchCollectStatusResponse, DimensProxyMessage, DimensAuthChangedMessage } from '@/shared/types/messages';
+import type { Message, MessageResponse, BatchCollectStatusResponse, DimensProxyMessage, DimensAuthChangedMessage, DimensOpenAuthorizedPageMessage } from '@/shared/types/messages';
 import type { PostEntity, AuthorEntity, CommentEntity } from '@/shared/types/entities';
 import { DIMENS_BASE, STORAGE_KEY_AUTH, type DimensAuth } from '@/shared/services/dimens-service';
 
@@ -100,6 +100,9 @@ async function handleMessage(
     case 'dimens:open-login-page':
       return handleDimensOpenLoginPage();
 
+    case 'dimens:open-authorized-page':
+      return handleDimensOpenAuthorizedPage(message.data);
+
     case 'dimens:logout':
       return handleDimensLogout();
 
@@ -166,16 +169,52 @@ async function handleCollectPost(data: unknown): Promise<MessageResponse<PostEnt
   }
 }
 
+function validateAuthorForSave(author: Partial<AuthorEntity>): { ok: boolean; reason?: string } {
+  if (!author.platform) return { ok: false, reason: '缺少平台' };
+  if (!author.authorId) return { ok: false, reason: '缺少作者ID' };
+  if (!author.name && !author.avatar && !author.profileUrl) {
+    return { ok: false, reason: '作者信息为空' };
+  }
+  return { ok: true };
+}
+
+function buildAuthorSavePayload(author: Partial<AuthorEntity>): Omit<AuthorEntity, 'id' | 'collectedAt' | 'updatedAt'> {
+  return {
+    platform: author.platform!,
+    authorId: author.authorId!,
+    name: author.name || '',
+    avatar: author.avatar,
+    profileUrl: author.profileUrl || '',
+    bio: author.bio,
+    fansCount: author.fansCount,
+    followCount: author.followCount,
+    likedCount: author.likedCount,
+    workCount: author.workCount,
+    location: author.location,
+    gender: author.gender,
+    verified: author.verified,
+    verifiedDesc: author.verifiedDesc,
+    contactInfo: author.contactInfo,
+    sourcePageUrl: author.sourcePageUrl || ''
+  };
+}
+
 async function handleCollectAuthor(data: unknown): Promise<MessageResponse<AuthorEntity>> {
   try {
     const { platform, author } = data as { platform: string; author: Partial<AuthorEntity> };
     
     const authorId = author.authorId;
-    let authorData = author;
+    let authorData: Partial<AuthorEntity> = { ...author, platform: (author.platform || platform) as any };
     
     if (authorId && cachedAuthors.has(authorId)) {
-      authorData = { ...cachedAuthors.get(authorId), ...author };
+      authorData = { ...cachedAuthors.get(authorId), ...author, platform: (author.platform || platform) as any };
       console.log(`[智联AI] 从缓存获取用户数据: ${authorId}`, authorData);
+    }
+
+    const validation = validateAuthorForSave(authorData);
+    if (!validation.ok) {
+      console.warn(`[智联AI] 跳过低质量作者数据: ${authorId || 'unknown'} - ${validation.reason}`, authorData);
+      return { success: false, error: validation.reason || '作者数据不完整' };
     }
     
     const taskId = await addTask({
@@ -188,24 +227,7 @@ async function handleCollectAuthor(data: unknown): Promise<MessageResponse<Autho
     });
 
     try {
-      const id = await addAuthor({
-        platform: platform as any,
-        authorId: authorData.authorId!,
-        name: authorData.name || '',
-        avatar: authorData.avatar,
-        profileUrl: authorData.profileUrl || '',
-        bio: authorData.bio,
-        fansCount: authorData.fansCount,
-        followCount: authorData.followCount,
-        likedCount: authorData.likedCount,
-        workCount: authorData.workCount,
-        location: authorData.location,
-        gender: authorData.gender,
-        verified: authorData.verified,
-        verifiedDesc: authorData.verifiedDesc,
-        contactInfo: authorData.contactInfo,
-        sourcePageUrl: authorData.sourcePageUrl || ''
-      });
+      const id = await addAuthor(buildAuthorSavePayload(authorData));
 
       await updateTask(taskId, { status: 'success' });
 
@@ -320,6 +342,7 @@ const DIMENS_LOGIN_URL = `${DIMENS_ORIGIN}/login`;
 const DIMENS_COOKIE_TOKEN_NAMES = ['dimens_access_token'];
 const DIMENS_AUTH_REQUIRED = 'DIMENS_AUTH_REQUIRED';
 const DIMENS_ME_PATH = '/app/user/info/person';
+const DIMENS_AUTH_HEADER_RULE_ID = 9001;
 type DimensAuthHeadersResult =
   | { ok: true; headers: Record<string, string>; cookieName: string }
   | { ok: false; response: MessageResponse };
@@ -358,6 +381,29 @@ function isDimensAuthError(status: number, json: any): boolean {
     json?.message?.includes('未登录') ||
     json?.message?.includes('Unauthorized') ||
     json?.message?.includes('token expired');
+}
+
+function normalizeDimensTeamIds(data: any): string[] {
+  const rawTeams = [
+    ...(Array.isArray(data?.teamIds) ? data.teamIds : []),
+    ...(Array.isArray(data?.teamIdList) ? data.teamIdList : []),
+    ...(Array.isArray(data?.teams) ? data.teams : []),
+    ...(Array.isArray(data?.teamList) ? data.teamList : []),
+    ...(Array.isArray(data?.orgs) ? data.orgs : []),
+    ...(Array.isArray(data?.orgList) ? data.orgList : []),
+    data?.teamId,
+    data?.orgId,
+    data?.currentTeamId,
+    data?.currentOrgId,
+  ];
+
+  return Array.from(new Set(rawTeams
+    .map((team: any) => {
+      if (!team) return '';
+      if (typeof team === 'string') return team;
+      return team.id || team.teamId || team.orgId || team.code || '';
+    })
+    .filter(Boolean)));
 }
 
 async function buildDimensAuthHeaders(): Promise<DimensAuthHeadersResult> {
@@ -413,7 +459,7 @@ async function handleDimensMe(): Promise<MessageResponse<DimensAuth>> {
       checkedAt: Date.now(),
       cookieName: authHeaders.cookieName,
       userInfo: data,
-      teamIds: data.teamIds || data.teams?.map((team: any) => team.id || team.teamId).filter(Boolean) || [],
+      teamIds: normalizeDimensTeamIds(data),
     };
 
     await ChromeStorage.setItem(STORAGE_KEY_AUTH, auth);
@@ -445,6 +491,9 @@ async function handleDimensCookieChanged(changeInfo: chrome.cookies.CookieChange
 
   if (changeInfo.removed) {
     await ChromeStorage.removeItem(STORAGE_KEY_AUTH);
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [DIMENS_AUTH_HEADER_RULE_ID],
+    }).catch(() => undefined);
     broadcastDimensAuthChanged({ status: 'unauthenticated' });
     return;
   }
@@ -462,11 +511,64 @@ async function handleDimensOpenLoginPage(): Promise<MessageResponse> {
   }
 }
 
+async function handleDimensOpenAuthorizedPage(data: unknown): Promise<MessageResponse> {
+  try {
+    const { url } = data as DimensOpenAuthorizedPageMessage;
+    const targetUrl = new URL(url);
+    if (targetUrl.origin !== DIMENS_ORIGIN) {
+      return { success: false, error: '只能打开维表智联页面' };
+    }
+
+    const cookieToken = await readDimensCookieToken();
+    if (!cookieToken?.token) {
+      return { success: false, code: DIMENS_AUTH_REQUIRED, error: '请先登录维表智联' };
+    }
+
+    const tab = await chrome.tabs.create({ url: 'about:blank', active: true });
+    if (!tab.id) {
+      return { success: false, error: '无法创建维表标签页' };
+    }
+
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [DIMENS_AUTH_HEADER_RULE_ID],
+      addRules: [{
+        id: DIMENS_AUTH_HEADER_RULE_ID,
+        priority: 1,
+        action: {
+          type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
+          requestHeaders: [{
+            header: 'authorization',
+            operation: chrome.declarativeNetRequest.HeaderOperation.SET,
+            value: `Bearer ${cookieToken.token}`,
+          }],
+        },
+        condition: {
+          urlFilter: '||dimens.bintelai.com/',
+          tabIds: [tab.id],
+          resourceTypes: [
+            chrome.declarativeNetRequest.ResourceType.MAIN_FRAME,
+            chrome.declarativeNetRequest.ResourceType.SUB_FRAME,
+            chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST,
+          ],
+        },
+      }],
+    });
+
+    await chrome.tabs.update(tab.id, { url: targetUrl.toString() });
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || '打开维表页面失败' };
+  }
+}
+
 async function handleDimensLogout(): Promise<MessageResponse> {
   try {
     for (const name of DIMENS_COOKIE_TOKEN_NAMES) {
       await chrome.cookies.remove({ name, url: DIMENS_ORIGIN }).catch(() => undefined);
     }
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [DIMENS_AUTH_HEADER_RULE_ID],
+    }).catch(() => undefined);
     await ChromeStorage.removeItem(STORAGE_KEY_AUTH);
     broadcastDimensAuthChanged({ status: 'unauthenticated', reason: 'logout' });
     return { success: true };
@@ -580,26 +682,14 @@ async function handleCacheAuthor(data: unknown): Promise<MessageResponse> {
     
     if (author.authorId) {
       cachedAuthors.set(author.authorId, author);
+      const validation = validateAuthorForSave(author);
+      if (!validation.ok) {
+        console.warn(`[智联AI] 仅缓存低质量用户，暂不落库: ${author.authorId} - ${validation.reason}`, author);
+        return { success: true, data: { skipped: true, reason: validation.reason } };
+      }
       
       try {
-        await addAuthor({
-          platform: author.platform!,
-          authorId: author.authorId,
-          name: author.name || '',
-          avatar: author.avatar,
-          profileUrl: author.profileUrl || '',
-          bio: author.bio,
-          fansCount: author.fansCount,
-          followCount: author.followCount,
-          likedCount: author.likedCount,
-          workCount: author.workCount,
-          location: author.location,
-          gender: author.gender,
-          verified: author.verified,
-          verifiedDesc: author.verifiedDesc,
-          contactInfo: author.contactInfo,
-          sourcePageUrl: author.sourcePageUrl || ''
-        });
+        await addAuthor(buildAuthorSavePayload(author));
         console.log(`[智联AI] 自动保存用户: ${author.authorId} - ${author.name}`, author);
       } catch (e: any) {
         if (!e.message?.includes('already exists')) {
@@ -677,9 +767,9 @@ async function handleBatchCollectStart(data: unknown): Promise<MessageResponse> 
       return { success: false, error: 'URL列表为空' };
     }
 
-    batchCollectManager.startBatchCollect(urls);
+    const result = await batchCollectManager.startBatchCollect(urls);
     
-    return { success: true };
+    return { success: result.accepted > 0, data: result, error: result.accepted > 0 ? undefined : '没有可采集的URL' };
   } catch (error) {
     return { success: false, error: (error as Error).message };
   }

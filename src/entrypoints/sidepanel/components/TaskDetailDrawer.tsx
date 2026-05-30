@@ -1,4 +1,4 @@
-import { X, CheckCircle, XCircle, Clock, Link, Calendar, RefreshCw, Trash2 } from 'lucide-react';
+import { X, CheckCircle, XCircle, Clock, Link, Calendar, Trash2 } from 'lucide-react';
 import { useUIStore, useTasksStore } from '@/shared/store';
 import { formatDate, cn } from '@/shared/utils/helpers';
 import type { TaskType, TaskStatus } from '@/shared/types';
@@ -24,18 +24,13 @@ const statusConfig: Record<TaskStatus, { label: string; color: string; bgColor: 
  */
 export default function TaskDetailDrawer() {
   const { taskDetailOpen, taskDetailId, closeTaskDetailDrawer } = useUIStore();
-  const { tasks, retryTask, deleteTask } = useTasksStore();
+  const { tasks, deleteTask } = useTasksStore();
 
   const task = tasks.find(t => t.id === taskDetailId);
 
   if (!taskDetailOpen || !task) return null;
 
   const config = statusConfig[task.status];
-
-  const handleRetry = async () => {
-    await retryTask(task.id);
-    closeTaskDetailDrawer();
-  };
 
   const handleDelete = async () => {
     if (confirm('确定要删除此任务吗？')) {
@@ -198,15 +193,6 @@ export default function TaskDetailDrawer() {
         </div>
 
         <div className="p-4 border-t border-gray-200 flex gap-2">
-          {task.status === 'failed' && (
-            <button
-              onClick={handleRetry}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-              重试
-            </button>
-          )}
           {(task.status === 'success' || task.status === 'failed' || task.status === 'canceled') && (
             <button
               onClick={handleDelete}

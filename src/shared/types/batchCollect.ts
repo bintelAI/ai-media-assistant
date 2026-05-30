@@ -35,7 +35,7 @@ export interface BatchCollectProgress {
   success: number;
   failed: number;
   currentUrl: string;
-  status: 'idle' | 'running' | 'paused' | 'completed' | 'error';
+  status: 'idle' | 'preparing' | 'running' | 'paused' | 'completed' | 'error';
   results: CollectResult[];
 }
 
@@ -84,6 +84,6 @@ export interface BatchCollectConfig {
  */
 export const DEFAULT_BATCH_COLLECT_CONFIG: BatchCollectConfig = {
   minInterval: 3000,
-  maxInterval: 10000,
+  maxInterval: 6000,
   maxRetries: 3
 };

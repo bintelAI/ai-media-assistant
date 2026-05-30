@@ -10,7 +10,7 @@ const navItems = [
   { id: 'tasks', label: '任务', icon: ListTodo },
   { id: 'batchCollect', label: '批量', icon: Link },
   // { id: 'downloads', label: '下载', icon: Download },
-  { id: 'settings', label: '', icon: Settings }
+  { id: 'settings', label: '设置', icon: Settings }
 ] as const;
 
 export default function Navigation() {
@@ -110,47 +110,64 @@ export default function Navigation() {
     '已登录';
 
   return (
-    <nav className="bg-white border-b border-gray-200 px-3 py-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-0.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setCurrentPage(item.id)}
-                className={cn(
-                  'flex items-center gap-1 px-2.5 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  currentPage === item.id
-                    ? 'bg-primary-50 text-primary-600'
-                    : 'text-gray-600 hover:bg-gray-100'
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {item.label && <span>{item.label}</span>}
-              </button>
-            );
-          })}
+    <nav className="border-b border-slate-200 bg-white">
+      <div className="flex h-12 items-center justify-between gap-3 px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50">
+            <img src="/icon/32.png" alt="智联AI" className="h-6 w-6 rounded" />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-slate-950">智联AI</div>
+            <div className="truncate text-[11px] text-slate-500">采集助手</div>
+          </div>
         </div>
+
         <button
+          type="button"
           onClick={handleLogin}
           className={cn(
-            'ml-2 flex max-w-[112px] items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
+            'flex min-h-[36px] max-w-[144px] shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2',
             auth
-              ? 'bg-green-50 text-green-700 hover:bg-green-100'
-              : 'bg-gray-900 text-white hover:bg-gray-800'
+              ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+            (checking || waitingLogin) && 'cursor-wait'
           )}
           title={auth ? '刷新维表登录状态' : waitingLogin ? '等待维表登录完成' : '登录维表智联'}
+          aria-label={auth ? `维表智联已登录，${displayName}` : waitingLogin ? '等待维表智联登录完成' : '登录维表智联'}
         >
           {checking || waitingLogin ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
           ) : auth ? (
-            <UserCircle className="h-3.5 w-3.5" />
+            <UserCircle className="h-4 w-4 shrink-0" />
           ) : (
-            <LogIn className="h-3.5 w-3.5" />
+            <LogIn className="h-4 w-4 shrink-0" />
           )}
           <span className="truncate">{checking || waitingLogin ? '登录中' : auth ? displayName : '登录'}</span>
         </button>
+      </div>
+
+      <div className="grid grid-cols-5 gap-1 border-t border-slate-100 px-2 py-1.5">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const active = currentPage === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setCurrentPage(item.id)}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'relative flex min-h-[38px] items-center justify-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2',
+                active
+                  ? 'bg-primary-50 text-primary-700'
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+              )}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
       </div>
     </nav>
   );

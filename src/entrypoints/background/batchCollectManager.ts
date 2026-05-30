@@ -1,10 +1,18 @@
-import { parseUrl, isXhsShortUrl } from '@/shared/utils/urlParser';
 import { resolveShortUrls, type ShortUrlResolveResult } from '@/shared/services/shortUrlResolver';
 import { addAuthor } from '@/shared/db/authors';
 import { addPost } from '@/shared/db/posts';
 import { addTask, updateTask } from '@/shared/db/tasks';
 import { fetchUserOtherInfo } from '@/shared/services/xhs-user-service';
 import { fetchPgyCreatorInfo, fetchPgyPostDetail } from '@/shared/services/pgy-user-service';
+import { ChromeStorage } from '@/shared/utils/storage';
+import {
+  DEFAULT_SETTINGS,
+  isBatchCollectSupported,
+  PLATFORM_FEATURES,
+  SETTINGS_STORAGE_KEY,
+  unwrapStoredSettings,
+  type StoredAppSettings
+} from '@/shared/utils/constants';
 import type {
   CollectTask,
   BatchCollectProgress,
@@ -15,6 +23,12 @@ import type {
 import { DEFAULT_BATCH_COLLECT_CONFIG } from '@/shared/types/batchCollect';
 import type { AuthorEntity, PostEntity } from '@/shared/types/entities';
 
+interface BatchCollectStartResult {
+  total: number;
+  accepted: number;
+  skipped: number;
+}
+
 export class BatchCollectManager {
   private taskQueue: CollectTask[] = [];
   private isRunning: boolean = false;
@@ -24,6 +38,8 @@ export class BatchCollectManager {
   private progress: BatchCollectProgress;
   private taskId: string | null = null;
   private abortController: AbortController | null = null;
+  private devMode: boolean = false;
+  private skippedBeforeQueue: number = 0;
 
   constructor(config: Partial<BatchCollectConfig> = {}) {
     this.config = { ...DEFAULT_BATCH_COLLECT_CONFIG, ...config };
@@ -42,11 +58,23 @@ export class BatchCollectManager {
     };
   }
 
-  async startBatchCollect(urls: string[]): Promise<void> {
+  async startBatchCollect(urls: string[]): Promise<BatchCollectStartResult> {
     if (this.isRunning) {
       console.warn('[BatchCollectManager] 已有采集任务在运行');
-      return;
+      throw new Error('已有批量采集任务在运行');
     }
+
+    await this.applySettings();
+    this.progress = {
+      total: urls.length,
+      current: 0,
+      success: 0,
+      failed: 0,
+      currentUrl: '',
+      status: 'preparing',
+      results: []
+    };
+    this.notifyProgress();
 
     console.log('[BatchCollectManager] 检测到短链，开始解析...');
     const resolveResults = await resolveShortUrls(urls);
@@ -56,8 +84,11 @@ export class BatchCollectManager {
       r.success && r.parsed !== undefined && r.parsed.id !== ''
     );
 
-    if (validResolveResults.length === 0) {
-      console.warn('[BatchCollectManager] 没有有效的URL');
+    const unsupportedResults = validResolveResults.filter((r) => !this.canUseApiCollect(r.parsed));
+    const supportedResolveResults = validResolveResults.filter((r) => this.canUseApiCollect(r.parsed));
+
+    if (supportedResolveResults.length === 0) {
+      console.warn('[BatchCollectManager] 没有可采集的URL');
       this.progress = {
         total: urls.length,
         current: 0,
@@ -65,17 +96,17 @@ export class BatchCollectManager {
         failed: urls.length,
         currentUrl: '',
         status: 'error',
-        results: urls.map(url => ({
+        results: urls.map((url) => ({
           success: false,
           url,
-          error: '无法解析URL'
+          error: '无法解析或暂不支持该URL'
         }))
       };
       this.notifyProgress();
-      return;
+      return { total: urls.length, accepted: 0, skipped: urls.length };
     }
 
-    const parsedUrls = validResolveResults.map(r => r.parsed as ParsedUrl);
+    const parsedUrls = supportedResolveResults.map(r => r.parsed as ParsedUrl);
 
     this.taskQueue = parsedUrls.map(parsed => ({
       url: parsed.originalUrl,
@@ -87,15 +118,21 @@ export class BatchCollectManager {
     this.isRunning = true;
     this.isPaused = false;
     this.currentIndex = 0;
+    this.skippedBeforeQueue = unsupportedResults.length;
     this.progress = {
-      total: this.taskQueue.length,
-      current: 0,
+      total: this.taskQueue.length + this.skippedBeforeQueue,
+      current: this.skippedBeforeQueue,
       success: 0,
       failed: 0,
       currentUrl: '',
       status: 'running',
-      results: []
+      results: unsupportedResults.map((result) => ({
+        success: false,
+        url: result.originalUrl,
+        error: this.getUnsupportedReason(result.parsed)
+      }))
     };
+    this.progress.failed = unsupportedResults.length;
 
     this.abortController = new AbortController();
 
@@ -103,13 +140,25 @@ export class BatchCollectManager {
       taskType: 'collect_post',
       title: `URL批量采集 (${this.taskQueue.length}个)`,
       status: 'running',
-      totalCount: this.taskQueue.length
+      totalCount: this.progress.total,
+      failedCount: this.skippedBeforeQueue
     });
 
     console.log(`[BatchCollectManager] 开始批量采集，共 ${this.taskQueue.length} 个URL`);
     this.notifyProgress();
 
-    await this.processQueue();
+    this.processQueue().catch((error) => {
+      console.error('[BatchCollectManager] 队列执行失败:', error);
+      this.progress.status = 'error';
+      this.progress.currentUrl = '';
+      this.notifyProgress();
+    });
+
+    return {
+      total: urls.length,
+      accepted: this.taskQueue.length,
+      skipped: urls.length - this.taskQueue.length
+    };
   }
 
   private async processQueue(): Promise<void> {
@@ -126,7 +175,8 @@ export class BatchCollectManager {
       const task = this.taskQueue[this.currentIndex];
       task.status = 'running';
       this.progress.currentUrl = task.url;
-      this.progress.current = this.currentIndex + 1;
+      this.progress.current = this.skippedBeforeQueue + this.currentIndex + 1;
+      this.notifyProgress();
 
       try {
         const result = await this.collectTask(task);
@@ -185,14 +235,35 @@ export class BatchCollectManager {
     return {
       success: false,
       url: task.url,
-      error: '不支持的URL类型，目前支持小红书和蒲公英用户主页/帖子详情采集'
+      error: this.getUnsupportedReason(task.parsed)
     };
   }
 
   private canUseApiCollect(parsed: ParsedUrl): boolean {
-    return (parsed.platform === 'xhs' && parsed.pageType === 'author_profile') ||
-           (parsed.platform === 'pgy' && parsed.pageType === 'author_profile') ||
-           (parsed.platform === 'pgy' && parsed.pageType === 'post_detail');
+    return isBatchCollectSupported(parsed.platform, parsed.pageType, this.devMode);
+  }
+
+  private getUnsupportedReason(parsed: ParsedUrl): string {
+    const feature = PLATFORM_FEATURES[parsed.platform];
+    if (feature?.status !== 'enabled' && !this.devMode) {
+      return `${feature.label}暂未支持`;
+    }
+    return '不支持的URL类型，目前批量采集支持小红书作者主页';
+  }
+
+  private async applySettings(): Promise<void> {
+    const state = unwrapStoredSettings(await ChromeStorage.getItem<StoredAppSettings>(SETTINGS_STORAGE_KEY));
+    const minInterval = Number(state?.collectIntervalMinMs ?? DEFAULT_SETTINGS.collectIntervalMinMs);
+    const maxInterval = Number(state?.collectIntervalMaxMs ?? DEFAULT_SETTINGS.collectIntervalMaxMs);
+    const normalizedMin = Number.isFinite(minInterval) ? Math.max(1000, minInterval) : DEFAULT_SETTINGS.collectIntervalMinMs;
+    const normalizedMax = Number.isFinite(maxInterval) ? Math.max(normalizedMin, maxInterval) : DEFAULT_SETTINGS.collectIntervalMaxMs;
+
+    this.config = {
+      minInterval: normalizedMin,
+      maxInterval: normalizedMax,
+      maxRetries: DEFAULT_BATCH_COLLECT_CONFIG.maxRetries
+    };
+    this.devMode = Boolean(state?.devMode);
   }
 
   private async collectXhsAuthor(task: CollectTask): Promise<CollectResult> {

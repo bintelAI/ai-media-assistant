@@ -1,20 +1,16 @@
 import { useEffect } from 'react';
 import { useTasksStore } from '@/shared/store';
-import { Trash2, RefreshCw } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { formatDate, cn } from '@/shared/utils/helpers';
 
 export default function DownloadsCenter() {
-  const { tasks, loading, fetchTasks, retryTask, deleteTask } = useTasksStore();
+  const { tasks, loading, fetchTasks, deleteTask } = useTasksStore();
 
   useEffect(() => {
     fetchTasks(undefined, 'download_media');
   }, []);
 
   const downloadTasks = tasks.filter(t => t.taskType === 'download_media');
-
-  const handleRetry = async (id: string) => {
-    await retryTask(id);
-  };
 
   const handleDelete = async (id: string) => {
     if (confirm('确定要删除此记录吗？')) {
@@ -71,15 +67,6 @@ export default function DownloadsCenter() {
                   </div>
                   
                   <div className="flex items-center gap-1">
-                    {task.status === 'failed' && (
-                      <button
-                        onClick={() => handleRetry(task.id)}
-                        className="p-1 text-gray-400 hover:text-primary-500"
-                        title="重试"
-                      >
-                        <RefreshCw className="w-4 h-4" />
-                      </button>
-                    )}
                     <button
                       onClick={() => handleDelete(task.id)}
                       className="p-1 text-gray-400 hover:text-red-500"

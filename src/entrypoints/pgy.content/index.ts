@@ -1,4 +1,6 @@
 import { sendMessage } from '@/shared/utils/messaging';
+import { ChromeStorage } from '@/shared/utils/storage';
+import { SETTINGS_STORAGE_KEY, unwrapStoredSettings, type StoredAppSettings } from '@/shared/utils/constants';
 import type { PageType } from '@/shared/types';
 import type { PostEntity, AuthorEntity } from '@/shared/types/entities';
 
@@ -22,7 +24,15 @@ export default defineContentScript({
   // 保持ISOLATED world以便访问chrome API
   // world: 'ISOLATED' 是默认值
 
-  main() {
+  async main() {
+    const state = unwrapStoredSettings(await ChromeStorage.getItem<StoredAppSettings>(SETTINGS_STORAGE_KEY));
+    if (!state?.devMode) {
+      console.info('[智联AI] 蒲公英暂未支持，普通模式不注入采集脚本');
+      return;
+    }
+    document.documentElement.dataset.zlPgyDevMode = 'true';
+    window.dispatchEvent(new CustomEvent('zl_pgy_dev_mode_enabled'));
+
     console.log('[智联AI] 蒲公英 ISOLATED world 脚本已加载');
 
     // 创建根容器（参考靓号项目）

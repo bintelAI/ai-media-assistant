@@ -15,6 +15,7 @@ import {
   createNewProject,
   createStandardSheetForType,
   ensureColumns,
+  getProjectInfo,
   getSheetConfig,
   openDimensLoginPage,
   logout,
@@ -40,6 +41,9 @@ export default function Settings() {
     autoOpenSidePanel,
     taskConcurrency,
     retryCount,
+    devMode,
+    collectIntervalMinMs,
+    collectIntervalMaxMs,
     updateSettings,
     resetSettings
   } = useSettingsStore();
@@ -145,18 +149,19 @@ export default function Settings() {
       const auth = await checkAuth();
       const tids = await getTeamIds();
       setTeamIds(tids.length > 0 ? tids : auth.teamIds || []);
+      const result = await checkConnection();
+      setConnectionStatus(result.ok ? 'connected' : 'error');
+      setStatusMessage(result.message);
+      if (!result.ok) return;
+
+      await getProjectInfo();
       const config = await getConfig();
       setCurrentTeamId(config.teamId);
       setCurrentProjectId(config.projectId || '');
       setCurrentProjectName(config.projectName || DEFAULT_PROJECT_NAME);
       syncSheetTargetFromConfig(selectedSheetType, config);
-      const result = await checkConnection();
-      setConnectionStatus(result.ok ? 'connected' : 'error');
-      setStatusMessage(result.message);
-      if (result.ok) {
-        await loadProjects(config.teamId);
-        await loadSheets(config.projectId);
-      }
+      await loadProjects(config.teamId);
+      await loadSheets(config.projectId);
     } catch (e: any) {
       setConnectionStatus('disconnected');
       setStatusMessage(e.message || '未登录维表智联');
@@ -311,11 +316,6 @@ export default function Settings() {
   };
 
   const handleCreateStandardSheet = async () => {
-    if (!currentProjectId) {
-      setFieldStatus('请先选择项目');
-      return;
-    }
-
     try {
       setUpdatingSheet(true);
       setFieldStatus('正在创建标准表...');
@@ -323,7 +323,12 @@ export default function Settings() {
       setSelectedSheetTarget(target);
       setSelectedSheetId(target.sheetId);
       setNewSheetName('');
-      await loadSheets(currentProjectId);
+      const config = await getConfig();
+      setCurrentTeamId(config.teamId);
+      setCurrentProjectId(config.projectId || '');
+      setCurrentProjectName(config.projectName || DEFAULT_PROJECT_NAME);
+      await loadProjects(config.teamId);
+      await loadSheets(config.projectId);
       setFieldStatus('标准表已创建并补齐字段');
     } catch (e: any) {
       setFieldStatus(e.message || '创建标准表失败');
@@ -373,10 +378,10 @@ export default function Settings() {
 
   const connectionIcon = () => {
     switch (connectionStatus) {
-      case 'connected': return <CheckCircle2 className="w-4 h-4 text-green-500" />;
-      case 'error': return <XCircle className="w-4 h-4 text-red-500" />;
-      case 'checking': return <Database className="w-4 h-4 text-gray-400" />;
-      default: return <XCircle className="w-4 h-4 text-gray-400" />;
+      case 'connected': return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
+      case 'error': return <XCircle className="h-4 w-4 text-rose-600" />;
+      case 'checking': return <Database className="h-4 w-4 text-slate-400" />;
+      default: return <XCircle className="h-4 w-4 text-slate-400" />;
     }
   };
 
@@ -390,69 +395,77 @@ export default function Settings() {
   };
 
   return (
-    <div className="h-full overflow-auto p-4 space-y-4">
+    <div className="h-full overflow-auto bg-transparent p-4 space-y-4">
       {/* 维表智联配置 */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <Database className="w-4 h-4 text-primary-500" />
-            <h3 className="font-medium">维表智联 - 数据仓库</h3>
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
+        <div className="border-b border-slate-200 bg-slate-950 px-4 py-4 text-white">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/10 text-cyan-200">
+              <Database className="h-5 w-5" />
+            </span>
+            <div>
+              <h3 className="text-sm font-semibold">维表智联数据仓库</h3>
+              <p className="text-xs text-slate-400">配置团队、项目与默认入库表</p>
+            </div>
           </div>
         </div>
         <div className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium">连接状态</p>
-              <p className="text-xs text-gray-400">{statusMessage}</p>
+                <p className="text-sm font-semibold text-slate-900">连接状态</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">{statusMessage}</p>
             </div>
             <div className="flex items-center gap-2">
               {connectionIcon()}
-              <span className={`text-sm ${connectionStatus === 'connected' ? 'text-green-600' : connectionStatus === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
+                <span className={`text-sm font-medium ${connectionStatus === 'connected' ? 'text-emerald-700' : connectionStatus === 'error' ? 'text-rose-700' : 'text-slate-500'}`}>
                 {connectionLabel()}
               </span>
               {connectionStatus !== 'checking' && (
                 <button
                   onClick={handleRefresh}
-                  className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                    className="flex h-9 w-9 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
                   title="刷新连接"
+                    aria-label="刷新连接"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                    <RefreshCw className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
+            </div>
           </div>
           {connectionStatus !== 'connected' && (
-            <div className="pt-3 border-t border-gray-100 space-y-2">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
               <div className="flex gap-2">
                 <button
                   onClick={handleOpenWebLogin}
                   disabled={connectionStatus === 'checking'}
-                  className="flex-1 py-2 text-sm border border-gray-200 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                  className="min-h-[44px] flex-1 rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-50"
                 >
                   {connectionStatus === 'checking' ? '登录中...' : '登录维表智联'}
                 </button>
               </div>
-              <p className="text-xs text-gray-400">网页登录成功后，插件会监听维表 Cookie 写入并自动确认登录状态。</p>
+              <p className="text-xs leading-5 text-amber-800">网页登录成功后，插件会监听维表 Cookie 写入并自动确认登录状态。</p>
             </div>
           )}
 
           {/* Team / Project config - shown when connected */}
           {connectionStatus === 'connected' && (
-            <div className="space-y-3 pt-2 border-t border-gray-100">
+            <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/50">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">团队 ID</label>
+                <label className="mb-1 block text-xs font-medium text-slate-600">团队 ID</label>
                 {teamIds.length > 0 ? (
                   <div className="relative">
                     <select
                       value={currentTeamId}
                       onChange={(e) => handleTeamChange(e.target.value)}
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm appearance-none pr-8 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      className="min-h-[40px] w-full appearance-none rounded-md border border-slate-300 bg-white px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                     >
                       {teamIds.map((tid) => (
                         <option key={tid} value={tid}>{tid}</option>
                       ))}
                     </select>
-                    <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   </div>
                 ) : (
                   <input
@@ -461,34 +474,34 @@ export default function Settings() {
                     onChange={(e) => setCurrentTeamId(e.target.value)}
                     onBlur={() => handleTeamChange(currentTeamId)}
                     placeholder="输入团队ID"
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="min-h-[40px] w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
                 )}
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">项目</label>
+                <label className="mb-1 block text-xs font-medium text-slate-600">项目</label>
                 {loadingProjects ? (
-                  <p className="text-xs text-gray-400 py-1.5">加载中...</p>
+                  <p className="py-1.5 text-xs text-slate-500">加载中...</p>
                 ) : projects.length > 0 ? (
                   <div className="space-y-1.5">
                     <div className="relative">
                       <select
                         value={currentProjectId || currentProjectName}
                         onChange={(e) => handleProjectSelect(e.target.value)}
-                        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm appearance-none pr-8 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        className="min-h-[40px] w-full appearance-none rounded-md border border-slate-300 bg-white px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                       >
                         {projects.map((p) => (
                             <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
                       </select>
-                      <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     </div>
                     <button
                       onClick={() => setShowNewProject(!showNewProject)}
-                      className="flex items-center gap-1 text-xs text-primary-500 hover:text-primary-600"
+                      className="flex min-h-[32px] items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"
                     >
-                      <Plus className="w-3 h-3" />
+                      <Plus className="h-3 w-3" />
                       {showNewProject ? '取消创建' : '创建新项目'}
                     </button>
                   </div>
@@ -507,9 +520,9 @@ export default function Settings() {
                         await saveConfig({ teamId: currentTeamId, projectId: undefined, projectName: currentProjectName, sheetTargets: {} });
                       }}
                       placeholder="输入项目名称"
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      className="min-h-[40px] w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
-                    <p className="text-xs text-gray-400">未找到项目，可输入名称自动创建</p>
+                    <p className="text-xs text-slate-400">未找到项目，可输入名称自动创建</p>
                   </div>
                 )}
               </div>
@@ -521,29 +534,29 @@ export default function Settings() {
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
                     placeholder="新项目名称"
-                    className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="min-h-[40px] flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                     onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
                   />
                   <button
                     onClick={handleCreateProject}
                     disabled={!newProjectName.trim()}
-                    className="px-3 py-1.5 bg-primary-500 text-white rounded-md text-sm hover:bg-primary-600 disabled:opacity-50"
+                    className="min-h-[40px] rounded-md bg-primary-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
                   >
                     创建
                   </button>
                 </div>
               )}
 
-              <div className="space-y-3 pt-3 border-t border-gray-100">
+              <div className="space-y-3 border-t border-slate-100 pt-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium">默认入库表</p>
-                    <p className="text-xs text-gray-400">按数据类型分别保存目标表，入库弹窗会复用这里的配置</p>
+                    <p className="text-sm font-semibold text-slate-900">默认入库表</p>
+                    <p className="text-xs leading-5 text-slate-500">按数据类型分别保存目标表，入库弹窗会复用这里的配置</p>
                   </div>
                   <select
                     value={selectedSheetType}
                     onChange={(e) => handleSheetTypeChange(e.target.value as SheetType)}
-                    className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="min-h-[40px] rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="posts">帖子</option>
                     <option value="authors">作者</option>
@@ -552,9 +565,9 @@ export default function Settings() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">{SHEET_TYPE_LABELS[selectedSheetType]}目标表</label>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{SHEET_TYPE_LABELS[selectedSheetType]}目标表</label>
                   {loadingSheets ? (
-                    <p className="text-xs text-gray-400 py-1.5">正在加载表...</p>
+                    <p className="py-1.5 text-xs text-slate-500">正在加载表...</p>
                   ) : currentProjectId ? (
                     <div className="space-y-2">
                       <div className="relative">
@@ -562,7 +575,7 @@ export default function Settings() {
                           value={selectedSheetId}
                           disabled={updatingSheet}
                           onChange={(e) => handleSheetSelect(e.target.value)}
-                          className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm appearance-none pr-8 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+                          className="min-h-[40px] w-full appearance-none rounded-md border border-slate-300 bg-white px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
                         >
                           <option value="">请选择已有表</option>
                           {selectedSheetTarget && !sheets.some((sheet) => sheet.sheetId === selectedSheetTarget.sheetId) && (
@@ -572,7 +585,7 @@ export default function Settings() {
                             <option key={sheet.sheetId} value={sheet.sheetId}>{sheet.name || sheet.sheetId}</option>
                           ))}
                         </select>
-                        <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       </div>
 
                       <input
@@ -580,41 +593,41 @@ export default function Settings() {
                         value={newSheetName}
                         onChange={(e) => setNewSheetName(e.target.value)}
                         placeholder={`新建表名称，默认：${sheetConfig.name}`}
-                        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        className="min-h-[40px] w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
 
                       <div className="flex gap-2">
                         <button
                           onClick={handleCreateStandardSheet}
                           disabled={updatingSheet}
-                          className="flex-1 py-1.5 text-sm border border-gray-200 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                          className="min-h-[40px] flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
                         >
                           创建标准表
                         </button>
                         <button
                           onClick={handleEnsureColumns}
                           disabled={!selectedSheetId || updatingSheet}
-                          className="flex-1 py-1.5 text-sm border border-gray-200 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                          className="min-h-[40px] flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
                         >
                           补齐标准字段
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs text-gray-400 py-1.5">请先选择项目后再选择目标表</p>
+                    <p className="py-1.5 text-xs text-slate-400">请先选择项目后再选择目标表</p>
                   )}
                 </div>
 
                 {selectedSheetTarget && (
-                  <div className="rounded-md bg-gray-50 border border-gray-100 px-3 py-2">
-                    <p className="text-xs text-gray-500">当前默认表</p>
-                    <p className="text-sm font-medium text-gray-700">{selectedSheetTarget.sheetName}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">主键：{selectedSheetTarget.upsertKeys.join(' + ')}</p>
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+                    <p className="text-xs font-medium text-emerald-700">当前默认表</p>
+                    <p className="text-sm font-semibold text-slate-900">{selectedSheetTarget.sheetName}</p>
+                    <p className="mt-0.5 text-xs text-emerald-700">主键：{selectedSheetTarget.upsertKeys.join(' + ')}</p>
                   </div>
                 )}
 
                 {fieldStatus && (
-                  <p className="text-xs text-gray-500">{fieldStatus}</p>
+                  <p className="rounded-md bg-slate-50 px-2 py-1.5 text-xs leading-5 text-slate-500">{fieldStatus}</p>
                 )}
               </div>
             </div>
@@ -623,7 +636,7 @@ export default function Settings() {
           {connectionStatus === 'connected' && (
             <button
               onClick={handleLogout}
-              className="w-full py-2 text-sm border border-red-200 text-red-600 rounded-md hover:bg-red-50 transition-colors"
+              className="min-h-[44px] w-full rounded-md border border-rose-200 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50"
             >
               退出维表登录
             </button>
@@ -632,20 +645,21 @@ export default function Settings() {
       </div>
 
       {/* 基础设置 */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="font-medium">基础设置</h3>
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">基础设置</h3>
+          <p className="mt-0.5 text-xs text-slate-500">导出、去重与侧栏行为</p>
         </div>
         <div className="p-4 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium">默认导出格式</p>
-              <p className="text-xs text-gray-400">选择导出数据的默认格式</p>
+              <p className="text-sm font-medium text-slate-900">默认导出格式</p>
+              <p className="text-xs text-slate-500">选择导出数据的默认格式</p>
             </div>
             <select
               value={defaultExportFormat}
               onChange={(e) => updateSettings({ defaultExportFormat: e.target.value as 'csv' | 'excel' | 'json' })}
-              className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="min-h-[40px] rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <option value="excel">Excel</option>
               <option value="csv">CSV</option>
@@ -655,8 +669,8 @@ export default function Settings() {
 
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium">自动去重</p>
-              <p className="text-xs text-gray-400">采集时自动跳过已存在的数据</p>
+              <p className="text-sm font-medium text-slate-900">自动去重</p>
+              <p className="text-xs text-slate-500">采集时自动跳过已存在的数据</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -665,14 +679,14 @@ export default function Settings() {
                 onChange={(e) => updateSettings({ autoDedupe: e.target.checked })}
                 className="sr-only peer"
               />
-              <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-500"></div>
+              <div className="h-5 w-9 rounded-full bg-slate-200 peer peer-checked:bg-primary-500 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
             </label>
           </div>
 
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium">采集后自动打开侧栏</p>
-              <p className="text-xs text-gray-400">采集完成后自动打开 Side Panel</p>
+              <p className="text-sm font-medium text-slate-900">采集后自动打开侧栏</p>
+              <p className="text-xs text-slate-500">采集完成后自动打开 Side Panel</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -681,22 +695,39 @@ export default function Settings() {
                 onChange={(e) => updateSettings({ autoOpenSidePanel: e.target.checked })}
                 className="sr-only peer"
               />
-              <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-500"></div>
+              <div className="h-5 w-9 rounded-full bg-slate-200 peer peer-checked:bg-primary-500 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-slate-900">开发模式</p>
+              <p className="text-xs text-slate-500">仅用于内部调试未开放平台入口</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={devMode}
+                onChange={(e) => updateSettings({ devMode: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="h-5 w-9 rounded-full bg-slate-200 peer peer-checked:bg-primary-500 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
             </label>
           </div>
         </div>
       </div>
 
       {/* 任务设置 */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="font-medium">任务设置</h3>
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">任务设置</h3>
+          <p className="mt-0.5 text-xs text-slate-500">控制批量采集节奏与失败重试</p>
         </div>
         <div className="p-4 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium">并发数</p>
-              <p className="text-xs text-gray-400">同时执行的任务数量</p>
+              <p className="text-sm font-medium text-slate-900">并发数</p>
+              <p className="text-xs text-slate-500">同时执行的任务数量</p>
             </div>
             <input
               type="number"
@@ -704,14 +735,14 @@ export default function Settings() {
               max={5}
               value={taskConcurrency}
               onChange={(e) => updateSettings({ taskConcurrency: parseInt(e.target.value) })}
-              className="w-16 px-2 py-1 border border-gray-300 rounded-md text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="min-h-[40px] w-16 rounded-md border border-slate-300 px-2 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
 
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium">重试次数</p>
-              <p className="text-xs text-gray-400">任务失败后的重试次数</p>
+              <p className="text-sm font-medium text-slate-900">重试次数</p>
+              <p className="text-xs text-slate-500">任务失败后的重试次数</p>
             </div>
             <input
               type="number"
@@ -719,55 +750,101 @@ export default function Settings() {
               max={5}
               value={retryCount}
               onChange={(e) => updateSettings({ retryCount: parseInt(e.target.value) })}
-              className="w-16 px-2 py-1 border border-gray-300 rounded-md text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="min-h-[40px] w-16 rounded-md border border-slate-300 px-2 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-900">批量采集间隔</p>
+                <p className="text-xs text-slate-500">每条 URL 之间随机等待，降低连续访问风险</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={Math.round(collectIntervalMinMs / 1000)}
+                  onChange={(e) => {
+                    const seconds = Math.max(1, Number(e.target.value) || 1);
+                    const minMs = seconds * 1000;
+                    updateSettings({
+                      collectIntervalMinMs: minMs,
+                      collectIntervalMaxMs: Math.max(minMs, collectIntervalMaxMs)
+                    });
+                  }}
+                  className="min-h-[40px] w-16 rounded-md border border-slate-300 px-2 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  aria-label="批量采集最小间隔秒数"
+                />
+                <span className="text-xs text-slate-400">-</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={Math.round(collectIntervalMaxMs / 1000)}
+                  onChange={(e) => {
+                    const seconds = Math.max(1, Number(e.target.value) || 1);
+                    const maxMs = seconds * 1000;
+                    updateSettings({
+                      collectIntervalMinMs: Math.min(collectIntervalMinMs, maxMs),
+                      collectIntervalMaxMs: maxMs
+                    });
+                  }}
+                  className="min-h-[40px] w-16 rounded-md border border-slate-300 px-2 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  aria-label="批量采集最大间隔秒数"
+                />
+                <span className="text-xs text-slate-400">秒</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* 数据管理 */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="font-medium">数据管理</h3>
+      <div className="rounded-lg border border-rose-100 bg-white shadow-sm shadow-slate-200/70">
+        <div className="border-b border-rose-100 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">数据管理</h3>
+          <p className="mt-0.5 text-xs text-slate-500">清理本地采集缓存，操作不可恢复</p>
         </div>
         <div className="p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm">帖子数据</p>
+            <p className="text-sm font-medium text-slate-800">帖子数据</p>
             <button
               onClick={handleClearPosts}
-              className="flex items-center gap-1 px-3 py-1 text-sm text-red-500 hover:bg-red-50 rounded"
+              className="flex min-h-[36px] items-center gap-1 rounded-md px-3 text-sm font-medium text-rose-600 hover:bg-rose-50"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="h-4 w-4" />
               清空
             </button>
           </div>
 
           <div className="flex items-center justify-between">
-            <p className="text-sm">作者数据</p>
+            <p className="text-sm font-medium text-slate-800">作者数据</p>
             <button
               onClick={handleClearAuthors}
-              className="flex items-center gap-1 px-3 py-1 text-sm text-red-500 hover:bg-red-50 rounded"
+              className="flex min-h-[36px] items-center gap-1 rounded-md px-3 text-sm font-medium text-rose-600 hover:bg-rose-50"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="h-4 w-4" />
               清空
             </button>
           </div>
 
           <div className="flex items-center justify-between">
-            <p className="text-sm">评论数据</p>
+            <p className="text-sm font-medium text-slate-800">评论数据</p>
             <button
               onClick={handleClearComments}
-              className="flex items-center gap-1 px-3 py-1 text-sm text-red-500 hover:bg-red-50 rounded"
+              className="flex min-h-[36px] items-center gap-1 rounded-md px-3 text-sm font-medium text-rose-600 hover:bg-rose-50"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="h-4 w-4" />
               清空
             </button>
           </div>
 
-          <div className="pt-2 border-t border-gray-200">
+          <div className="border-t border-rose-100 pt-3">
             <button
               onClick={handleClearAll}
-              className="w-full py-2 text-sm text-white bg-red-500 hover:bg-red-600 rounded"
+              className="min-h-[44px] w-full rounded-md bg-rose-600 text-sm font-medium text-white hover:bg-rose-700"
             >
               清空所有数据
             </button>
@@ -776,16 +853,16 @@ export default function Settings() {
       </div>
 
       {/* 其他 */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="font-medium">其他</h3>
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">其他</h3>
         </div>
         <div className="p-4">
           <button
             onClick={handleResetSettings}
-            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded"
+            className="flex min-h-[44px] items-center gap-2 rounded-md px-4 text-sm font-medium text-slate-600 hover:bg-slate-100"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="h-4 w-4" />
             重置所有设置
           </button>
         </div>

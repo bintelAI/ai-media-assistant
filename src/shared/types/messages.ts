@@ -34,6 +34,7 @@ export type MessageType =
   | 'dimens:me'
   | 'dimens:capture-cookie-token'
   | 'dimens:open-login-page'
+  | 'dimens:open-authorized-page'
   | 'dimens:logout'
   | 'dimens:auth-changed';
 
@@ -146,6 +147,10 @@ export interface DimensProxyMessage {
   path: string;
   body?: unknown;
   useAuth?: boolean;
+}
+
+export interface DimensOpenAuthorizedPageMessage {
+  url: string;
 }
 
 export interface DimensProxyResult {
