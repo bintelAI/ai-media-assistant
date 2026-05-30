@@ -4,6 +4,10 @@ import type { PostEntity, AuthorEntity } from '@/shared/types/entities';
 
 let currentPageType: PageType = 'unknown';
 let injectedUI: HTMLElement | null = null;
+let ensureUITimer: ReturnType<typeof setTimeout> | null = null;
+
+const PAGE_UI_CLASS = 'zl-page-collect-ui';
+const PAGE_UI_SELECTOR = `.${PAGE_UI_CLASS}`;
 
 const collectedPosts: Map<string, Partial<PostEntity>> = new Map();
 const collectedAuthors: Map<string, Partial<AuthorEntity>> = new Map();
@@ -262,10 +266,38 @@ function observePageChanges() {
         currentPageType = newPageType;
         onPageChanged(newPageType);
       }
+      return;
     }
+
+    scheduleEnsureUI();
   });
 
   observer.observe(document.documentElement || document, { childList: true, subtree: true });
+}
+
+function scheduleEnsureUI() {
+  if (ensureUITimer) return;
+
+  ensureUITimer = setTimeout(() => {
+    ensureUITimer = null;
+    if (shouldEnsurePageUI()) {
+      injectUIByPageType(currentPageType);
+    }
+  }, 300);
+}
+
+function shouldEnsurePageUI(): boolean {
+  if (!['post_detail', 'author_profile', 'feed_list', 'search_result'].includes(currentPageType)) {
+    return false;
+  }
+
+  if (currentPageType === 'feed_list' || currentPageType === 'search_result') {
+    return document.querySelectorAll(
+      '[data-e2e="recommend-list-item"], .video-card, .aweme-card, .xg_player, [class*="video-feed"] > div'
+    ).length > 0;
+  }
+
+  return !document.querySelector(PAGE_UI_SELECTOR);
 }
 
 function onPageChanged(pageType: PageType) {
@@ -294,6 +326,8 @@ function injectUIByPageType(pageType: PageType) {
 }
 
 function injectPostPageUI() {
+  if (currentPageType !== 'post_detail' || document.querySelector(PAGE_UI_SELECTOR)) return;
+
   const selectors = [
     '[data-e2e="video-desc"]',
     '.video-info-detail',
@@ -342,11 +376,15 @@ function injectPostPageUI() {
     }
   });
 
+  button.classList.add(PAGE_UI_CLASS);
+  button.dataset.zlPageType = 'post_detail';
   container.appendChild(button);
   injectedUI = button;
 }
 
 function injectAuthorPageUI() {
+  if (currentPageType !== 'author_profile' || document.querySelector(PAGE_UI_SELECTOR)) return;
+
   const selectors = [
     '[data-e2e="user-info"]',
     '.user-info',
@@ -399,6 +437,8 @@ function injectAuthorPageUI() {
     }
   });
 
+  button.classList.add(PAGE_UI_CLASS);
+  button.dataset.zlPageType = 'author_profile';
   container.appendChild(button);
   injectedUI = button;
 }
@@ -586,5 +626,6 @@ function removeInjectedUI() {
     injectedUI.remove();
     injectedUI = null;
   }
+  document.querySelectorAll(PAGE_UI_SELECTOR).forEach(el => el.remove());
   document.querySelectorAll('.zl-collect-btn').forEach(el => el.remove());
 }

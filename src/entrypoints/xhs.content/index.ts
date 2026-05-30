@@ -16,6 +16,14 @@ interface XhsApi {
 let currentPageType: PageType = 'unknown';
 let injectedUI: HTMLElement | null = null;
 let xhsApi: XhsApi | null = null;
+let ensureUITimer: ReturnType<typeof setTimeout> | null = null;
+
+const PAGE_UI_CLASS = 'zl-page-collect-ui';
+const PAGE_UI_SELECTOR = `.${PAGE_UI_CLASS}`;
+
+function getPageUISelector(pageType: 'post_detail' | 'author_profile') {
+  return `${PAGE_UI_SELECTOR}[data-zl-page-type="${pageType}"]`;
+}
 
 const collectedPosts: Map<string, Partial<PostEntity>> = new Map();
 const collectedAuthors: Map<string, Partial<AuthorEntity>> = new Map();
@@ -550,10 +558,40 @@ function observePageChanges() {
       
       currentPageType = newPageType;
       onPageChanged(newPageType);
+      return;
     }
+
+    scheduleEnsureUI();
   });
   
   observer.observe(document.documentElement || document, { childList: true, subtree: true });
+}
+
+function scheduleEnsureUI() {
+  if (ensureUITimer) return;
+
+  ensureUITimer = setTimeout(() => {
+    ensureUITimer = null;
+    if (shouldEnsurePageUI()) {
+      injectUIByPageType(currentPageType);
+    }
+  }, 300);
+}
+
+function shouldEnsurePageUI(): boolean {
+  if (!['post_detail', 'author_profile', 'feed_list', 'search_result'].includes(currentPageType)) {
+    return false;
+  }
+
+  if (currentPageType === 'feed_list' || currentPageType === 'search_result') {
+    return document.querySelectorAll('.note-item, .feeds-page .note-list > div').length > 0;
+  }
+
+  if (currentPageType !== 'post_detail' && currentPageType !== 'author_profile') {
+    return false;
+  }
+
+  return !document.querySelector(getPageUISelector(currentPageType));
 }
 
 function onPageChanged(pageType: PageType) {
@@ -571,11 +609,28 @@ function onPageChanged(pageType: PageType) {
     }
   }, 1000);
 
-  removeInjectedUI();
+  cleanupUIForPageChange(pageType);
   
   setTimeout(() => {
     injectUIByPageType(pageType);
   }, 1000);
+}
+
+function cleanupUIForPageChange(nextPageType: PageType) {
+  removeListCollectButtons();
+
+  if (nextPageType === 'post_detail') {
+    removePageUIByType('post_detail');
+    return;
+  }
+
+  if (nextPageType === 'author_profile') {
+    removePageUIByType('post_detail');
+    return;
+  }
+
+  removePageUIByType('post_detail');
+  removePageUIByType('author_profile');
 }
 
 function injectUIByPageType(pageType: PageType) {
@@ -594,6 +649,8 @@ function injectUIByPageType(pageType: PageType) {
 }
 
 function injectPostPageUI() {
+  if (currentPageType !== 'post_detail' || document.querySelector(getPageUISelector('post_detail'))) return;
+
   const container = document.querySelector('.note-container, .note-content, #detail-desc');
   if (!container) {
     setTimeout(injectPostPageUI, 500);
@@ -601,6 +658,8 @@ function injectPostPageUI() {
   }
   
   const buttonsWrapper = document.createElement('div');
+  buttonsWrapper.className = PAGE_UI_CLASS;
+  buttonsWrapper.dataset.zlPageType = 'post_detail';
   const shadow = buttonsWrapper.attachShadow({ mode: 'open' });
   
   shadow.innerHTML = `
@@ -715,6 +774,8 @@ function injectPostPageUI() {
 }
 
 function injectAuthorPageUI() {
+  if (currentPageType !== 'author_profile' || document.querySelector(getPageUISelector('author_profile'))) return;
+
   const container = document.querySelector('.user-info, .user-side, .user-basic-info');
   if (!container) {
     setTimeout(injectAuthorPageUI, 500);
@@ -722,6 +783,8 @@ function injectAuthorPageUI() {
   }
   
   const buttonsWrapper = document.createElement('div');
+  buttonsWrapper.className = PAGE_UI_CLASS;
+  buttonsWrapper.dataset.zlPageType = 'author_profile';
   const shadow = buttonsWrapper.attachShadow({ mode: 'open' });
   
   shadow.innerHTML = `
@@ -1153,5 +1216,23 @@ function removeInjectedUI() {
     injectedUI = null;
   }
   
+  document.querySelectorAll(PAGE_UI_SELECTOR).forEach(el => el.remove());
+  removeListCollectButtons();
+}
+
+function removePageUIByType(pageType: 'post_detail' | 'author_profile') {
+  document.querySelectorAll(getPageUISelector(pageType)).forEach(el => {
+    if (el === injectedUI) {
+      injectedUI = null;
+    }
+    el.remove();
+  });
+
+  if (injectedUI && !injectedUI.isConnected) {
+    injectedUI = null;
+  }
+}
+
+function removeListCollectButtons() {
   document.querySelectorAll('.zl-collect-btn').forEach(el => el.remove());
 }
