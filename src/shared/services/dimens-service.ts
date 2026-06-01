@@ -58,6 +58,15 @@ export interface DimensColumn {
   config?: Record<string, any>;
 }
 
+export interface DimensView {
+  id: string;
+  viewId?: string;
+  name: string;
+  type: string;
+  isPublic?: boolean;
+  config?: Record<string, any>;
+}
+
 interface DimensRow {
   rowId: string;
   data: Record<string, any>;
@@ -94,21 +103,63 @@ interface SheetConfig {
   columns: SheetColumnConfig[];
 }
 
+function buildColumnConfig(column: SheetColumnConfig): Record<string, any> | undefined {
+  if (!column.options?.length) return undefined;
+  return {
+    options: column.options,
+    dataSourceType: 'manual',
+    dictionaryId: null,
+  };
+}
+
+function normalizeSelectConfig(config?: Record<string, any> | null): Record<string, any> {
+  return config && typeof config === 'object' ? config : {};
+}
+
+function hasSameSelectOptions(current: SelectOption[] | undefined, expected: SelectOption[]): boolean {
+  if (!Array.isArray(current) || current.length !== expected.length) return false;
+  const currentById = new Map(current.map((option) => [option.id, option]));
+  return expected.every((option) => {
+    const currentOption = currentById.get(option.id);
+    return currentOption?.label === option.label && currentOption?.color === option.color;
+  });
+}
+
+function needsColumnConfigRepair(column: DimensColumn, expected: SheetColumnConfig): boolean {
+  if (column.type !== expected.type) return false;
+  if (!expected.options?.length) return false;
+  const config = normalizeSelectConfig(column.config);
+  return (
+    config.dataSourceType !== 'manual' ||
+    config.dictionaryId !== null ||
+    !hasSameSelectOptions(config.options, expected.options)
+  );
+}
+
 const PLATFORM_OPTIONS: SelectOption[] = [
   { id: 'xhs', label: '小红书', color: 'bg-rose-100 text-rose-700' },
   { id: 'douyin', label: '抖音', color: 'bg-slate-100 text-slate-700' },
   { id: 'kuaishou', label: '快手', color: 'bg-emerald-100 text-emerald-700' },
   { id: 'xingtu', label: '星图', color: 'bg-blue-100 text-blue-700' },
-  { id: 'pgy', label: '蒲公英', color: 'bg-violet-100 text-violet-700' },
-  { id: 'tiktok', label: 'TikTok', color: 'bg-zinc-100 text-zinc-700' },
+  { id: 'pgy', label: '蒲公英', color: 'bg-purple-100 text-purple-700' },
+  { id: 'tiktok', label: 'TikTok', color: 'bg-gray-100 text-gray-700' },
 ];
 
 const POST_TYPE_OPTIONS: SelectOption[] = [
   { id: 'video', label: '视频', color: 'bg-blue-100 text-blue-700' },
   { id: 'image', label: '图文', color: 'bg-emerald-100 text-emerald-700' },
-  { id: 'mixed', label: '图文/视频', color: 'bg-violet-100 text-violet-700' },
+  { id: 'mixed', label: '图文/视频', color: 'bg-purple-100 text-purple-700' },
   { id: 'text', label: '文本', color: 'bg-slate-100 text-slate-700' },
 ];
+
+const DEFAULT_VIEW_CONFIG = {
+  filters: [],
+  filterMatchType: 'and',
+  sortRule: null,
+  groupBy: [],
+  hiddenColumnIds: [],
+  rowHeight: 'medium',
+};
 
 const GENDER_OPTIONS: SelectOption[] = [
   { id: 'male', label: '男', color: 'bg-blue-100 text-blue-700' },
@@ -447,8 +498,9 @@ async function createColumn(
   column: SheetColumnConfig
 ): Promise<string> {
   const body: Record<string, any> = { label: column.label, type: column.type };
-  if (column.options?.length) {
-    body.config = { options: column.options };
+  const config = buildColumnConfig(column);
+  if (config) {
+    body.config = config;
   }
 
   const result = await proxyRequest(
@@ -458,6 +510,20 @@ async function createColumn(
   );
   const data = result.data || result;
   return data.id || data.fieldId;
+}
+
+async function updateColumnConfig(sheetId: string, column: DimensColumn, expected: SheetColumnConfig): Promise<void> {
+  const config = buildColumnConfig(expected);
+  if (!config) return;
+
+  await proxyRequest('POST', `/app/mul/sheet/${sheetId}/column/${column.fieldId}/update`, {
+    label: column.label || expected.label,
+    type: column.type || expected.type,
+    config: {
+      ...normalizeSelectConfig(column.config),
+      ...config,
+    },
+  });
 }
 
 export async function listColumns(teamId: string, projectId: string, sheetId: string): Promise<DimensColumn[]> {
@@ -473,6 +539,40 @@ export async function listColumns(teamId: string, projectId: string, sheetId: st
       type: c.type || 'text',
       config: c.config || c.property || {},
     }));
+}
+
+export async function listViews(teamId: string, projectId: string, sheetId: string): Promise<DimensView[]> {
+  const result = await proxyRequest(
+    'GET',
+    `/app/mul/${teamId}/${projectId}/sheet/${sheetId}/view/list`
+  );
+  return pickList(result, ['views'])
+    .map((view: any) => ({
+      id: view.id || view.viewId,
+      viewId: view.viewId || view.id,
+      name: view.name || view.title || '',
+      type: view.type || 'grid',
+      isPublic: view.isPublic === true || view.isPublic === 1,
+      config: view.config || {},
+    }))
+    .filter((view) => view.id);
+}
+
+async function createDefaultView(teamId: string, projectId: string, sheetId: string): Promise<void> {
+  await proxyRequest('POST', `/app/mul/${teamId}/${projectId}/sheet/${sheetId}/view/create`, {
+    name: '默认视图',
+    type: 'grid',
+    isPublic: true,
+    config: DEFAULT_VIEW_CONFIG,
+  });
+}
+
+async function ensureDefaultView(teamId: string, projectId: string, sheetId: string): Promise<void> {
+  const views = await listViews(teamId, projectId, sheetId);
+  const hasPublicGridView = views.some((view) => view.type === 'grid' && view.isPublic);
+  if (!hasPublicGridView) {
+    await createDefaultView(teamId, projectId, sheetId);
+  }
 }
 
 function buildFieldMapping(columns: DimensColumn[], sheetType: SheetType): Record<string, string> {
@@ -506,12 +606,27 @@ export async function ensureColumns(
 
   for (const colConfig of SHEET_CONFIGS[sheetType].columns) {
     const existing = columns.find((c) => c.label === colConfig.label);
-    if (existing) continue;
+    if (existing) {
+      if (needsColumnConfigRepair(existing, colConfig)) {
+        try {
+          await updateColumnConfig(sheetId, existing, colConfig);
+          created.push(`${colConfig.label}(修复配置)`);
+        } catch (e: any) {
+          errors.push(`修复字段 "${colConfig.label}" 配置失败：${e.message || String(e)}`);
+        }
+      }
+      continue;
+    }
 
     try {
       const fieldId = await createColumn(teamId, projectId, sheetId, colConfig);
       if (fieldId) {
-        columns = [...columns, { fieldId, label: colConfig.label, type: colConfig.type }];
+        columns = [...columns, {
+          fieldId,
+          label: colConfig.label,
+          type: colConfig.type,
+          config: buildColumnConfig(colConfig),
+        }];
       }
       created.push(colConfig.label);
     } catch (e: any) {
@@ -521,7 +636,7 @@ export async function ensureColumns(
 
   // Some column APIs return asynchronously or do not echo the created field id. Read back once
   // before deciding whether fields are truly missing.
-  if (created.length > 0) {
+  if (created.length > 0 || errors.some((error) => error.includes('修复字段'))) {
     try {
       columns = await listColumns(teamId, projectId, sheetId);
     } catch (e: any) {
@@ -583,6 +698,7 @@ export async function createStandardSheetForType(sheetType: SheetType, sheetName
   const name = sheetName?.trim() || sheetConfig.name;
   const sheetId = await createSheet(projectId, name);
   const ensured = await ensureColumns(config.teamId, projectId, sheetId, sheetType);
+  await ensureDefaultView(config.teamId, projectId, sheetId);
   if (ensured.missing.length > 0) {
     throw new Error(formatColumnEnsureError('标准表已创建，但以下字段未能补齐', ensured.missing, ensured.errors));
   }
@@ -629,6 +745,7 @@ export async function ensureSheetTarget(sheetType: SheetType): Promise<DimensShe
   const sheetName = sheet?.name || sheetConfig.name;
 
   const ensured = await ensureColumns(config.teamId, projectId, sheetId, sheetType);
+  await ensureDefaultView(config.teamId, projectId, sheetId);
   if (ensured.missing.length > 0) {
     throw new Error(formatColumnEnsureError('目标表缺少字段', ensured.missing, ensured.errors));
   }
@@ -684,6 +801,13 @@ function formatOptionLabel(value: any, options: SelectOption[]): string {
   return options.find((item) => item.id === normalized)?.label || raw;
 }
 
+function formatOptionId(value: any, options: SelectOption[]): string {
+  const raw = normalizeString(value);
+  if (!raw) return '';
+  const normalized = normalizeOptionValue(raw, options);
+  return options.some((item) => item.id === normalized) ? normalized : raw;
+}
+
 function canonicalizeFieldValue(key: string, value: any): string {
   if (key === 'platform') return normalizeOptionValue(value, PLATFORM_OPTIONS);
   if (key === 'postType') return normalizeOptionValue(value, POST_TYPE_OPTIONS);
@@ -694,9 +818,26 @@ function canonicalizeFieldValue(key: string, value: any): string {
 function formatFieldValueForDimens(sheetType: SheetType, key: string, value: any): any {
   const column = getColumnConfigByKey(sheetType, key);
   if (column?.options?.length) {
+    return formatOptionId(value, column.options);
+  }
+  return value;
+}
+
+function formatFieldLabelForDimens(sheetType: SheetType, key: string, value: any): any {
+  const column = getColumnConfigByKey(sheetType, key);
+  if (column?.options?.length) {
     return formatOptionLabel(value, column.options);
   }
   return value;
+}
+
+function buildRowFilter(fieldId: string | undefined, value: any) {
+  return {
+    fieldId,
+    columnId: fieldId,
+    operator: 'equals',
+    value,
+  };
 }
 
 function isEmptyDimensValue(value: any): boolean {
@@ -845,17 +986,25 @@ async function findExistingRowByKey(
     {
       page: 1,
       size: 20,
-      filters: [{ fieldId: idFieldId, operator: 'equals', value: idValue }],
+      filters: [buildRowFilter(idFieldId, idValue)],
       filterMatchType: 'and',
     },
     {
       page: 1,
       size: 20,
-      filters: primaryKeys.map((key) => ({
-        fieldId: fieldMapping[key],
-        operator: 'equals',
-        value: formatFieldValueForDimens(sheetType, key, item[key]),
-      })),
+      filters: primaryKeys.map((key) => buildRowFilter(
+        fieldMapping[key],
+        formatFieldValueForDimens(sheetType, key, item[key])
+      )),
+      filterMatchType: 'and',
+    },
+    {
+      page: 1,
+      size: 20,
+      filters: primaryKeys.map((key) => buildRowFilter(
+        fieldMapping[key],
+        formatFieldLabelForDimens(sheetType, key, item[key])
+      )),
       filterMatchType: 'and',
     },
   ];
