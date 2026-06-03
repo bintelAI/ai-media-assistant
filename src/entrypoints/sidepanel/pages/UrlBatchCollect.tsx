@@ -87,7 +87,7 @@ export default function UrlBatchCollect() {
       .filter(url => url.length > 0);
 
     if (urls.length === 0) {
-      showToast('请输入至少一个URL', 'error');
+      showToast('请输入至少一个链接', 'error');
       return;
     }
 
@@ -102,7 +102,7 @@ export default function UrlBatchCollect() {
         const feature = PLATFORM_FEATURES[parsed.platform];
         const reason = feature?.status !== 'enabled' && !devMode
           ? `${feature.label}暂未支持`
-          : `${getPlatformDisplayName(parsed.platform)}${getPageTypeDisplayName(parsed.pageType)}暂未支持批量采集`;
+          : `${getPlatformDisplayName(parsed.platform)}${getPageTypeDisplayName(parsed.pageType, parsed.platform)}暂未支持批量采集`;
         unsupported.push({ url: parsed.originalUrl, reason });
       }
     });
@@ -112,11 +112,11 @@ export default function UrlBatchCollect() {
     setInvalidUrls(result.invalid);
 
     if (supported.length === 0) {
-      showToast(unsupported.length > 0 ? '解析成功，但当前没有可执行的批量采集URL' : '没有有效的URL', 'error');
+      showToast(unsupported.length > 0 ? '解析成功，但当前没有可执行的批量采集链接' : '没有有效的链接', 'error');
     } else if (result.invalid.length > 0 || unsupported.length > 0) {
       showToast(`解析完成，可采集 ${supported.length} 个，已剔除 ${result.invalid.length + unsupported.length} 个`, 'info');
     } else {
-      showToast(`成功解析${supported.length}个URL`, 'success');
+      showToast(`成功解析${supported.length}个链接`, 'success');
     }
   };
 
@@ -150,7 +150,7 @@ export default function UrlBatchCollect() {
    */
   const handleStartCollect = async () => {
     if (parsedUrls.length === 0) {
-      showToast('请先解析URL', 'error');
+      showToast('请先解析链接', 'error');
       return;
     }
 
@@ -241,7 +241,7 @@ export default function UrlBatchCollect() {
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <label className="text-sm font-semibold text-gray-900">URL列表</label>
-                  <p className="mt-0.5 text-xs text-gray-500">支持 `.txt` / `.csv`，每行一个 URL；当前批量采集仅开放小红书作者主页。</p>
+                  <p className="mt-0.5 text-xs text-gray-500">支持 `.txt` / `.csv`，每行一个 URL；当前批量采集开放小红书、抖音作者主页和内容详情。</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
@@ -273,13 +273,13 @@ export default function UrlBatchCollect() {
               <textarea
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                placeholder="请输入URL，每行一个&#10;当前批量采集支持小红书作者主页&#10;蒲公英、星图暂未支持&#10;&#10;示例：&#10;https://www.xiaohongshu.com/user/profile/xxxxx"
+                placeholder="请输入URL，每行一个&#10;当前批量采集支持小红书/抖音作者主页、帖子或作品详情&#10;蒲公英、星图暂未支持&#10;&#10;示例：&#10;https://www.xiaohongshu.com/user/profile/xxxxx&#10;https://www.xiaohongshu.com/explore/xxxxx&#10;https://www.douyin.com/user/MS4wLjABAAAAxxxxx&#10;https://www.douyin.com/video/1234567890"
                 className="h-40 w-full resize-none rounded-lg border border-gray-200 p-3 text-sm leading-5 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               />
               <div className="mt-3 flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-gray-500">
                   <FileText className="h-3.5 w-3.5 shrink-0" />
-                  已输入 {urlInput.split('\n').filter(u => u.trim()).length} 个URL
+                  已输入 {urlInput.split('\n').filter(u => u.trim()).length} 个链接
                   <span className="text-gray-300">|</span>
                   <Timer className="h-3.5 w-3.5 shrink-0" />
                   随机间隔 {intervalLabel}
@@ -289,7 +289,7 @@ export default function UrlBatchCollect() {
                   onClick={handleParseUrls}
                   className="min-h-[44px] rounded-md bg-primary-500 px-4 text-sm font-medium text-white transition-colors hover:bg-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
                 >
-                  解析URL
+                  解析链接
                 </button>
               </div>
             </section>
@@ -332,7 +332,7 @@ export default function UrlBatchCollect() {
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
                     <ListChecks className="h-4 w-4 text-primary-600" />
-                    有效URL ({parsedUrls.length})
+                    有效链接 ({parsedUrls.length})
                   </span>
                 </div>
                 <div className="max-h-60 overflow-auto space-y-2">
@@ -348,7 +348,7 @@ export default function UrlBatchCollect() {
                             {getPlatformDisplayName(parsed.platform)}
                           </span>
                           <span className="text-xs px-2 py-0.5 bg-gray-200 text-gray-600 rounded">
-                            {getPageTypeDisplayName(parsed.pageType)}
+                            {getPageTypeDisplayName(parsed.pageType, parsed.platform)}
                           </span>
                         </div>
                       </div>
@@ -452,7 +452,7 @@ export default function UrlBatchCollect() {
                 {isPaused ? '采集已暂停' : `采集中，随机间隔${intervalLabel}...`}
               </span>
             ) : (
-              <span>当前支持小红书作者主页，蒲公英/星图暂未支持</span>
+              <span>当前支持小红书/抖音作者主页和帖子/作品详情，蒲公英/星图暂未支持</span>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">

@@ -29,6 +29,8 @@ export type MessageType =
   | 'batch:collect:progress'
   | 'batch:collect:status'
   | 'xhs:api:call'
+  | 'douyin:api:ping'
+  | 'douyin:context:check'
   | 'pgy:api:call'
   | 'dimens:proxy'
   | 'dimens:me'
@@ -164,4 +166,16 @@ export interface DimensAuthChangedMessage {
   reason?: 'login-page-opened' | 'cookie-changed' | 'manual-refresh' | 'startup-check' | 'logout';
   userInfo?: unknown;
   error?: string;
+}
+
+export interface DouyinContextCheckResult {
+  ok: boolean;
+  tabId?: number;
+  href?: string;
+  readyState?: string;
+  hasBridge?: boolean;
+  hasGet?: boolean;
+  hasPost?: boolean;
+  error?: string;
+  action?: 'open_douyin' | 'refresh_douyin' | 'login_douyin' | 'retry_later';
 }

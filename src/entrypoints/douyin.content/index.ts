@@ -5,9 +5,12 @@ import type { PostEntity, AuthorEntity } from '@/shared/types/entities';
 let currentPageType: PageType = 'unknown';
 let injectedUI: HTMLElement | null = null;
 let ensureUITimer: ReturnType<typeof setTimeout> | null = null;
+let currentVisiblePostId: string | null = null;
+let activePostWatcherTimer: ReturnType<typeof setInterval> | null = null;
 
 const PAGE_UI_CLASS = 'zl-page-collect-ui';
 const PAGE_UI_SELECTOR = `.${PAGE_UI_CLASS}`;
+const DOUYIN_VIDEO_CONTROLS_SELECTOR = 'xg-controls:not(.control_autohide) xg-right-grid';
 
 const collectedPosts: Map<string, Partial<PostEntity>> = new Map();
 const collectedAuthors: Map<string, Partial<AuthorEntity>> = new Map();
@@ -17,13 +20,175 @@ interface DouyinAuthorPathInfo {
   isSecUid: boolean;
 }
 
+function normalizeDouyinUrl(url: string): string {
+  return String(url || '').replace(/^https:\/\/www-[^.]+\.douyin\.com/, 'https://www.douyin.com');
+}
+
+function getPageUISelector(pageType: 'post_detail' | 'author_profile') {
+  return `${PAGE_UI_SELECTOR}[data-zl-page-type="${pageType}"]`;
+}
+
+function getDouyinPostIdFromUrl(url = window.location.href): string | null {
+  const modalMatch = url.match(/[?&]modal_id=(\d+)/);
+  const pathMatch = url.match(/\/(?:video|note)\/(\d+)/);
+  return modalMatch?.[1] || pathMatch?.[1] || null;
+}
+
+function getDouyinPathPostId(url = window.location.href): string | null {
+  return url.match(/\/(?:video|note)\/(\d+)/)?.[1] || null;
+}
+
+function getDouyinModalPostId(url = window.location.href): string | null {
+  return url.match(/[?&]modal_id=(\d+)/)?.[1] || null;
+}
+
+function escapeAttributeValue(value: string): string {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function getDouyinPostIdFromElement(element?: Element | null): string | null {
+  if (!element) return null;
+
+  const current = element as HTMLElement;
+  const selfId = current.getAttribute?.('data-e2e-vid');
+  if (selfId) return selfId;
+
+  const closest = current.closest?.('[data-e2e-vid]') as HTMLElement | null;
+  const closestId = closest?.getAttribute('data-e2e-vid');
+  if (closestId) return closestId;
+
+  const child = current.querySelector?.('[data-e2e-vid]') as HTMLElement | null;
+  const childId = child?.getAttribute('data-e2e-vid');
+  if (childId) return childId;
+
+  const link = current.querySelector?.('a[href*="/video/"], a[href*="/note/"], a[href*="modal_id="]') as HTMLAnchorElement | null;
+  return link?.href ? getDouyinPostIdFromUrl(link.href) : null;
+}
+
+function getDouyinActiveDomPostId(): string | null {
+  const activeVideo = document.querySelector<HTMLElement>('div[data-e2e="feed-active-video"]');
+  const activeVideoId = activeVideo?.getAttribute('data-e2e-vid');
+  if (activeVideoId) return activeVideoId;
+
+  const activeControl = document.querySelector(`${DOUYIN_VIDEO_CONTROLS_SELECTOR}`);
+  const controlPostId = getDouyinPostIdFromElement(activeControl);
+  if (controlPostId) return controlPostId;
+
+  const visibleVideo = Array.from(document.querySelectorAll<HTMLElement>('div[data-e2e-vid]'))
+    .filter((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 240 && rect.height > 180 && rect.bottom > 0 && rect.top < window.innerHeight;
+    })
+    .sort((a, b) => {
+      const aRect = a.getBoundingClientRect();
+      const bRect = b.getBoundingClientRect();
+      const aArea = Math.max(0, Math.min(aRect.bottom, window.innerHeight) - Math.max(aRect.top, 0)) * aRect.width;
+      const bArea = Math.max(0, Math.min(bRect.bottom, window.innerHeight) - Math.max(bRect.top, 0)) * bRect.width;
+      return bArea - aArea;
+    })[0];
+
+  return visibleVideo?.getAttribute('data-e2e-vid') || null;
+}
+
+function getDouyinActivePostId(): string | null {
+  // 抖音精选/推荐/详情上下刷时，URL 的 modal_id 或 pathname 可能滞后于当前可见视频。
+  // 这里优先取官方 active DOM 标记，避免按钮采到上一条作品。
+  const domPostId = getDouyinActiveDomPostId();
+  if (domPostId) return domPostId;
+
+  const pathPostId = getDouyinPathPostId();
+  if (pathPostId) return pathPostId;
+
+  return getDouyinModalPostId();
+}
+
+function findDouyinPostActionAnchor(postId = getDouyinActivePostId()): Element | null {
+  if (postId) {
+    const safePostId = escapeAttributeValue(postId);
+    const inCurrentVideo = document.querySelector(`div[data-e2e-vid="${safePostId}"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}`);
+    if (inCurrentVideo) return inCurrentVideo;
+  }
+
+  const activeControls = document.querySelector(`div[data-e2e="feed-active-video"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}`);
+  if (activeControls) return activeControls;
+
+  const detailControls = document.querySelector(
+    `div[data-e2e="video-detail"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}, div[data-e2e="note-detail"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}`
+  );
+  if (detailControls) return detailControls;
+
+  return null;
+}
+
+function findDouyinAwemeInfoInReactProps(root: Element | null): any {
+  if (!root) return null;
+
+  const holder = root as unknown as Record<string, any>;
+  const propsKey = Object.keys(holder).find((key) => key.startsWith('__reactProps$'));
+  const children = propsKey ? holder[propsKey]?.children : null;
+  if (!Array.isArray(children)) return null;
+
+  for (const child of children) {
+    const awemeInfo = child?.props?.awemeInfo;
+    if (awemeInfo?.awemeId || awemeInfo?.aweme_id) {
+      return {
+        ...awemeInfo,
+        aweme_id: awemeInfo.aweme_id || awemeInfo.awemeId
+      };
+    }
+  }
+
+  return null;
+}
+
+function getDouyinAwemeInfoFromDOM(postId = getDouyinActivePostId()): any {
+  let root: Element | null = null;
+
+  if (postId) {
+    root = document.querySelector(`div[data-e2e-vid="${escapeAttributeValue(postId)}"]`);
+  }
+
+  if (!root) {
+    const pathMatch = window.location.pathname.match(/^\/(video|note)\/\d+/);
+    if (pathMatch) {
+      root = document.querySelector(`[data-e2e="${pathMatch[1]}-detail"]`)?.parentElement || null;
+    }
+  }
+
+  return findDouyinAwemeInfoInReactProps(root);
+}
+
+function cacheDouyinPostFromDOM(postId = getDouyinActivePostId()): Partial<PostEntity> | null {
+  const aweme = getDouyinAwemeInfoFromDOM(postId);
+  const postData = extractPostData(aweme);
+  if (postData?.postId) {
+    cacheDouyinPost(postData.postId, postData, aweme);
+    debouncedSavePosts();
+    return postData;
+  }
+
+  return null;
+}
+
+async function resolveDouyinPost(postId = getDouyinActivePostId()): Promise<Partial<PostEntity> | null> {
+  if (!postId) return null;
+
+  const cachedPost = collectedPosts.get(postId);
+  if (cachedPost) return cachedPost;
+
+  const domPost = cacheDouyinPostFromDOM(postId);
+  if (domPost) return domPost;
+
+  return fetchDouyinPostViaPageApi(postId);
+}
+
 /** 注入 MAIN world 脚本实现 fetch/XHR 拦截（ISOLATED world 无法拦截页面自身的 fetch）
  *  使用扩展文件 URL 而非内联代码，以绕过抖音 CSP 对内联脚本的限制 */
 function injectMainWorldInterceptor() {
   const script = document.createElement('script');
   script.src = chrome.runtime.getURL('douyin/main-interceptor.js');
   script.onload = () => script.remove();
-  document.documentElement.appendChild(script);
+  (document.head || document.documentElement || document).appendChild(script);
 }
 
 export default defineContentScript({
@@ -39,8 +204,130 @@ export default defineContentScript({
     // 监听 MAIN world 发来的拦截数据
     window.addEventListener('message', (event: MessageEvent) => {
       if (event.data?.type === 'zl_dy_api_response') {
-        handleApiData(event.data.url, event.data.data);
+        handleApiData(normalizeDouyinUrl(event.data.url), event.data.data);
       }
+    });
+
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message.type === 'douyin:api:ping') {
+        const requestId = Date.now().toString() + Math.random().toString(36).slice(2, 9);
+        let isResponded = false;
+
+        const cleanup = () => {
+          window.removeEventListener('message', handlePingResponse);
+          clearTimeout(timeoutId);
+        };
+
+        const timeoutId = setTimeout(() => {
+          if (isResponded) return;
+          isResponded = true;
+          cleanup();
+          sendResponse({
+            success: false,
+            error: '抖音页面请求函数未就绪，请刷新抖音页面后重试',
+            data: {
+              ok: false,
+              href: window.location.href,
+              readyState: document.readyState,
+              hasBridge: false,
+              action: 'refresh_douyin'
+            }
+          });
+        }, 5000);
+
+        const handlePingResponse = (event: MessageEvent) => {
+          if (
+            event.data?.type === 'zl_dy_api_ping_response' &&
+            event.data?.requestId === requestId &&
+            event.data?.source === 'main'
+          ) {
+            if (isResponded) return;
+            isResponded = true;
+            cleanup();
+            sendResponse({
+              success: true,
+              data: {
+                ok: Boolean(event.data.hasBridge),
+                href: event.data.href,
+                readyState: event.data.readyState,
+                hasBridge: Boolean(event.data.hasBridge),
+                hasGet: Boolean(event.data.hasGet),
+                hasPost: Boolean(event.data.hasPost),
+                action: event.data.hasBridge ? undefined : 'retry_later',
+                error: event.data.hasBridge ? undefined : '抖音页面请求函数未就绪，请等待页面加载完成后重试'
+              }
+            });
+          }
+        };
+
+        window.addEventListener('message', handlePingResponse);
+        window.postMessage({
+          type: 'zl_dy_api_ping',
+          requestId,
+          source: 'isolated'
+        }, '*');
+
+        return true;
+      }
+
+      if (message.type !== 'douyin:api:call') {
+        return;
+      }
+
+      const requestId = Date.now().toString() + Math.random().toString(36).slice(2, 9);
+      let isResponded = false;
+
+      const cleanup = () => {
+        window.removeEventListener('message', handleResponse);
+        window.removeEventListener('message', handleError);
+        clearTimeout(timeoutId);
+      };
+
+      const timeoutId = setTimeout(() => {
+        if (isResponded) return;
+        isResponded = true;
+        cleanup();
+        sendResponse({ success: false, error: '抖音 API 请求超时，请刷新抖音页面后重试' });
+      }, 30000);
+
+      const handleResponse = (event: MessageEvent) => {
+        if (
+          event.data?.type === 'zl_dy_api_call_response' &&
+          event.data?.requestId === requestId &&
+          event.data?.source === 'main'
+        ) {
+          if (isResponded) return;
+          isResponded = true;
+          cleanup();
+          sendResponse({ success: true, data: event.data.response });
+        }
+      };
+
+      const handleError = (event: MessageEvent) => {
+        if (
+          event.data?.type === 'zl_dy_api_call_error' &&
+          event.data?.requestId === requestId &&
+          event.data?.source === 'main'
+        ) {
+          if (isResponded) return;
+          isResponded = true;
+          cleanup();
+          sendResponse({ success: false, error: event.data.error });
+        }
+      };
+
+      window.addEventListener('message', handleResponse);
+      window.addEventListener('message', handleError);
+      window.postMessage({
+        type: 'zl_dy_api_request',
+        requestId,
+        source: 'isolated',
+        method: message.method || 'GET',
+        path: message.path,
+        params: message.params || {}
+      }, '*');
+
+      return true;
     });
 
     currentPageType = detectDYPage(window.location.href);
@@ -50,6 +337,7 @@ export default defineContentScript({
     });
 
     observePageChanges();
+    startActivePostWatcher();
   }
 });
 
@@ -57,8 +345,11 @@ export default defineContentScript({
 
 const DATA_API_PATTERNS = [
   '/aweme/v1/web/aweme/detail/',
+  '/aweme/v1/web/multi/aweme/detail/',
   '/aweme/v1/web/aweme/post/',
+  '/aweme/v2/web/module/feed/',
   '/aweme/v1/web/user/profile/',
+  '/aweme/v1/web/query/user/',
   '/aweme/v1/web/search/item/',
   '/aweme/v1/web/search/single/',
   '/aweme/v1/web/general/search/single/',
@@ -75,12 +366,17 @@ function isDataApiUrl(url: string): boolean {
 
 function handleApiData(url: string, data: any) {
   if (!data) return;
+  url = normalizeDouyinUrl(url);
 
   console.log('[智联AI] 抖音拦截到数据:', url.split('?')[0]);
 
-  if (url.includes('/aweme/detail/')) {
+  if (url.includes('/aweme/detail/') || url.includes('/multi/aweme/detail/')) {
     handleVideoDetailData(data);
-  } else if (url.includes('/aweme/post/') || url.includes('/user/posts/') || url.includes('/homepage/')) {
+  } else if (url.includes('/module/feed/')) {
+    handleListData(data, 'module_feed');
+  } else if (url.includes('/homepage/')) {
+    handleHomepageData(data);
+  } else if (url.includes('/aweme/post/') || url.includes('/user/posts/')) {
     handleListData(data, 'post');
   } else if (url.includes('/user/profile/')) {
     handleUserData(data);
@@ -93,56 +389,162 @@ function handleApiData(url: string, data: any) {
   }
 }
 
+function handleHomepageData(data: any) {
+  const root = data?.data || data;
+  const user = root?.user || root?.user_info || root?.author;
+  if (user) {
+    handleUserData({ user });
+  }
+  handleListData(data, 'homepage');
+}
+
 function handleVideoDetailData(data: any) {
   // Douyin 详情接口多级路径兼容
-  const aweme = data?.aweme_detail || data?.data?.aweme_detail || data?.data;
+  const awemeList = extractAwemeList(data);
+  const aweme = awemeList[0] || data?.aweme_detail || data?.data?.aweme_detail || data?.data;
   if (!aweme?.aweme_id) return;
 
   const postData = extractPostData(aweme);
   if (postData) {
-    collectedPosts.set(aweme.aweme_id, postData);
+    cacheDouyinPost(aweme.aweme_id, postData, aweme);
     console.log(`[智联AI] 抖音缓存视频详情: ${aweme.aweme_id} - ${postData.title}`);
+    scheduleEnsureUI();
   }
+  if (aweme.author) {
+    const authorData = extractAuthorData(aweme.author);
+    if (authorData) {
+      cacheAuthorAliases(aweme.author, authorData);
+      sendMessage('cache:author', { author: authorData });
+    }
+  }
+}
+
+function unwrapDouyinAweme(item: any): any {
+  return item?.aweme_info ||
+    item?.aweme ||
+    item?.data?.aweme_info ||
+    item?.data?.aweme ||
+    item?.data?.aweme_detail ||
+    item?.aweme_detail ||
+    item?.aweme_list?.[0] ||
+    item?.data?.aweme_list?.[0] ||
+    item?.aweme_mix_info?.mix_items?.[0] ||
+    item;
+}
+
+function extractAwemeList(data: any): any[] {
+  const roots = [
+    data,
+    data?.data,
+    data?.data?.data,
+    data?.aweme_detail,
+    data?.data?.aweme_detail
+  ];
+
+  const items: any[] = [];
+  for (const root of roots) {
+    if (!root) continue;
+    if (Array.isArray(root)) {
+      items.push(...root);
+      continue;
+    }
+    const list = root.aweme_list || root.awemeList || root.items || root.list || root.data;
+    if (Array.isArray(list)) {
+      items.push(...list);
+    } else if (root.aweme_id || root.aweme_info || root.aweme || root.aweme_detail) {
+      items.push(root);
+    }
+  }
+
+  return items.map(unwrapDouyinAweme).filter((aweme) => aweme?.aweme_id);
+}
+
+function cacheDouyinPost(postId: string, postData: Partial<PostEntity>, aweme?: any) {
+  const id = String(postId || postData.postId || '').trim();
+  if (!id) return;
+
+  const normalizedPost = { ...postData, postId: id };
+  collectedPosts.set(id, normalizedPost);
+
+  const aliases = [
+    aweme?.aweme_id,
+    aweme?.group_id,
+    aweme?.item_id,
+    aweme?.awemeId,
+    postData.postId
+  ].map((value) => String(value || '').trim()).filter(Boolean);
+
+  aliases.forEach((alias) => collectedPosts.set(alias, normalizedPost));
 }
 
 function handleListData(data: any, source: string) {
   // 兼容多种响应结构
-  const awemeList = data?.aweme_list || data?.data?.aweme_list || data?.data || [];
+  const awemeList = extractAwemeList(data);
   if (!Array.isArray(awemeList) || awemeList.length === 0) return;
 
   let count = 0;
+  let authorCount = 0;
   awemeList.forEach((item: any) => {
-    if (!item?.aweme_id) return;
-    const postData = extractPostData(item);
+    const aweme = unwrapDouyinAweme(item);
+    if (!aweme?.aweme_id) return;
+    const postData = extractPostData(aweme);
     if (postData) {
-      collectedPosts.set(item.aweme_id, postData);
+      cacheDouyinPost(aweme.aweme_id, postData, aweme);
       count++;
+    }
+    if (aweme.author) {
+      const authorData = extractAuthorData(aweme.author);
+      if (authorData) {
+        cacheAuthorAliases(aweme.author, authorData);
+        sendMessage('cache:author', { author: authorData });
+        authorCount++;
+      }
     }
   });
 
   if (count > 0) {
     console.log(`[智联AI] 抖音缓存 ${count} 条数据 (${source})`);
     debouncedSavePosts();
+    scheduleEnsureUI();
+  }
+  if (authorCount > 0) {
+    console.log(`[智联AI] 抖音同步缓存 ${authorCount} 个作者 (${source})`);
   }
 }
 
 function handleSearchData(data: any) {
   // 搜索接口可能返回流式数据或多条结果
   const dataRoot = data?.data || data;
-  const items = dataRoot?.aweme_list || dataRoot?.items || dataRoot?.results || [];
+  const items = Array.isArray(dataRoot)
+    ? dataRoot
+    : dataRoot?.aweme_list || dataRoot?.items || dataRoot?.results || [];
   if (Array.isArray(items)) {
     let count = 0;
+    let authorCount = 0;
     items.forEach((item: any) => {
-      if (!item?.aweme_id) return;
-      const postData = extractPostData(item);
+      const aweme = unwrapDouyinAweme(item);
+      if (!aweme?.aweme_id) return;
+      const postData = extractPostData(aweme);
       if (postData) {
-        collectedPosts.set(item.aweme_id, postData);
+        cacheDouyinPost(aweme.aweme_id, postData, aweme);
         count++;
+      }
+      if (aweme.author) {
+        const authorData = extractAuthorData(aweme.author);
+        if (authorData) {
+          cacheAuthorAliases(aweme.author, authorData);
+          sendMessage('cache:author', { author: authorData });
+          authorCount++;
+        }
       }
     });
     if (count > 0) {
       console.log(`[智联AI] 抖音缓存搜索 ${count} 条`);
       debouncedSavePosts();
+      scheduleEnsureUI();
+    }
+    if (authorCount > 0) {
+      console.log(`[智联AI] 抖音缓存搜索作者 ${authorCount} 个`);
     }
   }
 }
@@ -190,26 +592,47 @@ function cacheAuthorAliases(user: any, authorData: Partial<AuthorEntity>) {
   }
 }
 
+function getDouyinProfilePathId(user: any): string {
+  return String(
+    user?.sec_uid ||
+    user?.secUid ||
+    user?.web_rid ||
+    user?.webRid ||
+    user?.unique_id ||
+    user?.uniqueId ||
+    getAuthorPrimaryId(user)
+  ).trim();
+}
+
 function extractPostData(aweme: any): Partial<PostEntity> | null {
   if (!aweme?.aweme_id) return null;
 
   const author = aweme.author || {};
   const statistics = aweme.statistics || {};
   const video = aweme.video || {};
+  const hasVideo = !!(
+    video?.play_addr ||
+    video?.download_addr ||
+    video?.bit_rate?.length ||
+    video?.cover?.url_list?.length
+  );
+  const hasImages = Array.isArray(aweme.images) && aweme.images.length > 0;
+  const authorId = getAuthorPrimaryId(author);
+  const profilePathId = getDouyinProfilePathId(author);
 
   return {
     platform: 'douyin',
     postId: aweme.aweme_id,
-    postType: video ? 'video' : 'image',
+    postType: hasVideo ? 'video' : hasImages ? 'image' : 'video',
     title: aweme.desc || aweme.title || '',
     content: aweme.desc || '',
-    url: `https://www.douyin.com/video/${aweme.aweme_id}`,
-    coverUrl: video?.cover?.url_list?.[0] || aweme.cover?.url_list?.[0],
+    url: `https://www.douyin.com/${hasImages && !hasVideo ? 'note' : 'video'}/${aweme.aweme_id}`,
+    coverUrl: video?.cover?.url_list?.[0] || aweme.cover?.url_list?.[0] || aweme.images?.[0]?.url_list?.[0],
     publishTime: aweme.create_time ? new Date(aweme.create_time * 1000).toISOString() : undefined,
-    authorId: author.uid,
+    authorId,
     authorName: author.nickname || author.name,
-    authorUrl: author.uid
-      ? `https://www.douyin.com/user/${author.uid}`
+    authorUrl: profilePathId
+      ? `https://www.douyin.com/user/${profilePathId}`
       : undefined,
     likeCount: statistics.digg_count ?? statistics.like_count,
     commentCount: statistics.comment_count,
@@ -226,17 +649,16 @@ function extractPostData(aweme: any): Partial<PostEntity> | null {
 function extractAuthorData(user: any): Partial<AuthorEntity> | null {
   const authorId = getAuthorPrimaryId(user);
   if (!authorId) return null;
-  const secUid = user.sec_uid || user.secUid;
-  const profilePathId = secUid || authorId;
+  const profilePathId = getDouyinProfilePathId(user);
 
   return {
     platform: 'douyin',
     authorId,
     name: user.nickname || user.name || '',
-    avatar: user.avatar_medium?.url_list?.[0] || user.avatar_thumb?.url_list?.[0] || user.avatar_url,
+    avatar: user.avatar_medium?.url_list?.[0] || user.avatar_thumb?.url_list?.[0] || user.avatar_larger?.url_list?.[0] || user.avatar_url,
     profileUrl: `https://www.douyin.com/user/${profilePathId}`,
     bio: user.signature,
-    fansCount: user.follower_count,
+    fansCount: user.follower_count ?? user.mplatform_followers_count,
     followCount: user.following_count,
     likedCount: user.total_favorited,
     workCount: user.aweme_count,
@@ -248,16 +670,136 @@ function extractAuthorData(user: any): Partial<AuthorEntity> | null {
 
 // ==================== 防抖保存 ====================
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function ensureCurrentDouyinAuthor(authorPath?: DouyinAuthorPathInfo | null): Promise<Partial<AuthorEntity> | null> {
+  if (!authorPath?.id) return null;
+
+  const cachedAuthor = collectedAuthors.get(authorPath.id);
+  if (cachedAuthor) return cachedAuthor;
+
+  await sleep(1000);
+  const delayedCachedAuthor = collectedAuthors.get(authorPath.id);
+  if (delayedCachedAuthor) return delayedCachedAuthor;
+
+  return extractAuthorFromDOM(authorPath);
+}
+
+async function callDouyinPageApi<T>(
+  path: string,
+  params: Record<string, unknown>,
+  method = 'GET',
+  timeout = 30000
+): Promise<T | null> {
+  const requestId = Date.now().toString() + Math.random().toString(36).slice(2, 9);
+
+  return new Promise((resolve) => {
+    let isSettled = false;
+    const cleanup = () => {
+      window.removeEventListener('message', handleResponse);
+      window.removeEventListener('message', handleError);
+      clearTimeout(timer);
+    };
+    const settle = (value: T | null) => {
+      if (isSettled) return;
+      isSettled = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => settle(null), timeout);
+
+    const handleResponse = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'zl_dy_api_call_response' &&
+        event.data?.requestId === requestId &&
+        event.data?.source === 'main'
+      ) {
+        settle(event.data.response as T);
+      }
+    };
+
+    const handleError = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'zl_dy_api_call_error' &&
+        event.data?.requestId === requestId &&
+        event.data?.source === 'main'
+      ) {
+        console.warn('[智联AI] 抖音页面 API 调用失败:', event.data.error);
+        settle(null);
+      }
+    };
+
+    window.addEventListener('message', handleResponse);
+    window.addEventListener('message', handleError);
+    window.postMessage({
+      type: 'zl_dy_api_request',
+      requestId,
+      source: 'isolated',
+      method,
+      path,
+      params
+    }, '*');
+  });
+}
+
+async function fetchDouyinPostViaPageApi(postId: string): Promise<Partial<PostEntity> | null> {
+  const result = await callDouyinPageApi<any>('/aweme/v1/web/aweme/detail/', { aweme_id: postId });
+  const aweme = extractAwemeList(result)[0] ||
+    result?.aweme_detail ||
+    result?.data?.aweme_detail ||
+    result?.aweme ||
+    result?.data?.aweme;
+
+  const postData = extractPostData(aweme);
+  if (postData?.postId) {
+    cacheDouyinPost(postData.postId, postData, aweme);
+    debouncedSavePosts();
+    return postData;
+  }
+
+  return null;
+}
+
+async function collectDouyinPostById(postId?: string | null): Promise<{ success: boolean; error?: string }> {
+  const targetPostId = postId || getDouyinActivePostId();
+  const post = targetPostId ? await resolveDouyinPost(targetPostId) : findCurrentDouyinPost();
+
+  if (!post) {
+    return { success: false, error: '当前作品数据加载中，请先上下滑动一次或稍后重试' };
+  }
+
+  const response = await sendMessage('collect:post', {
+    platform: 'douyin',
+    post
+  });
+
+  return response.success
+    ? { success: true }
+    : { success: false, error: response.error || '采集失败' };
+}
+
 let savePostsTimer: ReturnType<typeof setTimeout> | null = null;
 
 function debouncedSavePosts() {
   if (savePostsTimer) clearTimeout(savePostsTimer);
   savePostsTimer = setTimeout(() => {
     if (collectedPosts.size > 0) {
-      sendMessage('cache:posts', { posts: Array.from(collectedPosts.values()) });
+      sendMessage('cache:posts', { posts: getUniqueCachedDouyinPosts() });
     }
     savePostsTimer = null;
   }, 1000);
+}
+
+function getUniqueCachedDouyinPosts(): Partial<PostEntity>[] {
+  const unique = new Map<string, Partial<PostEntity>>();
+  for (const post of collectedPosts.values()) {
+    const postId = String(post?.postId || '').trim();
+    if (postId) unique.set(postId, post);
+  }
+  return Array.from(unique.values());
 }
 
 // ==================== 页面检测与 UI 注入 ====================
@@ -272,19 +814,28 @@ function onPageLoaded() {
 }
 
 function detectDYPage(url: string): PageType {
-  if (url.match(/\/video\/\d+/)) {
+  const normalizedUrl = normalizeDouyinUrl(url);
+
+  if (normalizedUrl.match(/\/(?:video|note)\/\d+/) || normalizedUrl.match(/[?&]modal_id=\d+/)) {
     return 'post_detail';
   }
 
-  if (url.includes('/user/')) {
+  if (normalizedUrl.includes('/user/')) {
     return 'author_profile';
   }
 
-  if (url.includes('/search/')) {
+  if (normalizedUrl.includes('/search/')) {
     return 'search_result';
   }
 
-  if (url === 'https://www.douyin.com' || url.includes('/recommend') || url.includes('/?') ) {
+  const path = new URL(normalizedUrl, 'https://www.douyin.com').pathname;
+  if (
+    path === '/' ||
+    path === '/jingxuan' ||
+    path === '/recommend' ||
+    normalizedUrl.includes('/recommend') ||
+    normalizedUrl.includes('/?')
+  ) {
     return 'feed_list';
   }
 
@@ -299,10 +850,8 @@ function observePageChanges() {
       lastUrl = window.location.href;
       const newPageType = detectDYPage(window.location.href);
 
-      if (newPageType !== currentPageType) {
-        currentPageType = newPageType;
-        onPageChanged(newPageType);
-      }
+      currentPageType = newPageType;
+      onPageChanged(newPageType);
       return;
     }
 
@@ -310,6 +859,36 @@ function observePageChanges() {
   });
 
   observer.observe(document.documentElement || document, { childList: true, subtree: true });
+}
+
+function startActivePostWatcher() {
+  if (activePostWatcherTimer) return;
+
+  activePostWatcherTimer = setInterval(() => {
+    if (!['post_detail', 'feed_list', 'search_result'].includes(currentPageType)) return;
+
+    const activePostId = getDouyinActivePostId();
+    const actionAnchor = findDouyinPostActionAnchor(activePostId);
+    const currentPostUI = document.querySelector(getPageUISelector('post_detail'));
+
+    if (actionAnchor && currentPostUI && !actionAnchor.contains(currentPostUI)) {
+      currentVisiblePostId = activePostId || currentVisiblePostId;
+      if (activePostId) cacheDouyinPostFromDOM(activePostId);
+      removeInjectedUI();
+      injectPostActionUI(actionAnchor, activePostId);
+      return;
+    }
+
+    if (!activePostId || activePostId === currentVisiblePostId) return;
+
+    currentVisiblePostId = activePostId;
+    cacheDouyinPostFromDOM(activePostId);
+
+    if (currentPageType === 'post_detail' || findDouyinPostActionAnchor(activePostId)) {
+      removeInjectedUI();
+      injectUIByPageType(currentPageType);
+    }
+  }, 1000);
 }
 
 function scheduleEnsureUI() {
@@ -329,12 +908,14 @@ function shouldEnsurePageUI(): boolean {
   }
 
   if (currentPageType === 'feed_list' || currentPageType === 'search_result') {
-    return document.querySelectorAll(
-      '[data-e2e="recommend-list-item"], .video-card, .aweme-card, .xg_player, [class*="video-feed"] > div'
-    ).length > 0;
+    return !document.querySelector(getPageUISelector('post_detail')) || hasDouyinListCards();
   }
 
-  return !document.querySelector(PAGE_UI_SELECTOR);
+  if (currentPageType !== 'post_detail' && currentPageType !== 'author_profile') {
+    return false;
+  }
+
+  return !document.querySelector(getPageUISelector(currentPageType));
 }
 
 function onPageChanged(pageType: PageType) {
@@ -357,20 +938,50 @@ function injectUIByPageType(pageType: PageType) {
       break;
     case 'feed_list':
     case 'search_result':
+      injectCurrentPostFloatingUI();
       injectListPageUI();
       break;
   }
 }
 
+function hasDouyinListCards(): boolean {
+  return document.querySelectorAll(
+    '[data-e2e="recommend-list-item"], [data-e2e="feed-active-video"], [data-e2e-vid], .video-card, .aweme-card, .xg_player, [class*="video-feed"] > div'
+  ).length > 0;
+}
+
 function injectPostPageUI() {
-  if (currentPageType !== 'post_detail' || document.querySelector(PAGE_UI_SELECTOR)) return;
+  if (currentPageType !== 'post_detail') return;
+
+  const activePostId = getDouyinActivePostId();
+  const actionAnchor = findDouyinPostActionAnchor(activePostId);
+  const existingUI = document.querySelector(getPageUISelector('post_detail'));
+
+  if (existingUI) {
+    if (actionAnchor && !actionAnchor.contains(existingUI)) {
+      removeInjectedUI();
+      injectPostActionUI(actionAnchor, activePostId);
+    }
+    return;
+  }
+
+  if (actionAnchor) {
+    injectPostActionUI(actionAnchor, activePostId);
+    return;
+  }
 
   const selectors = [
     '[data-e2e="video-desc"]',
+    '[data-e2e="detail-desc"]',
+    '[data-e2e="note-desc"]',
     '.video-info-detail',
+    '.note-info-detail',
     '#videoDesc',
     '.choose-video-container',
-    '.desc-container'
+    '.desc-container',
+    '[class*="VideoInfo"]',
+    '[class*="NoteInfo"]',
+    '[class*="Detail"] [class*="desc"]'
   ];
 
   let container: Element | null = null;
@@ -380,47 +991,99 @@ function injectPostPageUI() {
   }
 
   if (!container) {
+    container = findDouyinDetailContainer();
+  }
+
+  if (!container) {
+    if (activePostId) {
+      injectCurrentPostFallbackUI();
+      return;
+    }
+
     setTimeout(injectPostPageUI, 500);
     return;
   }
 
-  const button = createCollectButton('采集视频', async () => {
+  const defaultText = window.location.pathname.includes('/note/') ? '采集图文' : '采集视频';
+  const { container: buttonContainer, button } = createCollectButton(defaultText, async () => {
     button.textContent = '采集中...';
-    (button as HTMLButtonElement).disabled = true;
+    button.disabled = true;
 
-    const match = window.location.href.match(/\/video\/(\d+)/);
-    const postId = match?.[1];
-    const cachedPost = postId ? collectedPosts.get(postId) : null;
+    const result = await collectDouyinPostById(getDouyinActivePostId());
 
-    if (cachedPost) {
-      const response = await sendMessage('collect:post', {
-        platform: 'douyin',
-        post: cachedPost
-      });
-
-      if (response.success) {
-        showToast('已保存到本地', 'success');
-        button.textContent = '已采集';
-      } else {
-        showToast('采集失败: ' + response.error, 'error');
-        button.textContent = '采集视频';
-        (button as HTMLButtonElement).disabled = false;
-      }
+    if (result.success) {
+      showToast('已保存到本地', 'success');
+      button.textContent = '已采集';
     } else {
-      showToast('数据加载中，请稍后刷新重试', 'info');
-      button.textContent = '采集视频';
-      (button as HTMLButtonElement).disabled = false;
+      showToast(result.error || '采集失败', 'error');
+      button.textContent = defaultText;
+      button.disabled = false;
     }
   });
 
-  button.classList.add(PAGE_UI_CLASS);
-  button.dataset.zlPageType = 'post_detail';
-  container.appendChild(button);
-  injectedUI = button;
+  buttonContainer.classList.add(PAGE_UI_CLASS);
+  buttonContainer.dataset.zlPageType = 'post_detail';
+  container.appendChild(buttonContainer);
+  injectedUI = buttonContainer;
+}
+
+function injectPostActionUI(anchor: Element, postId?: string | null) {
+  const defaultText = window.location.pathname.includes('/note/') ? '采集图文' : '采集视频';
+  const { container: buttonContainer, button } = createCollectButton(defaultText, async () => {
+    button.textContent = '采集中...';
+    button.disabled = true;
+
+    const activePostId = getDouyinActivePostId() || postId;
+    const result = await collectDouyinPostById(activePostId);
+
+    if (result.success) {
+      showToast('已保存到本地', 'success');
+      button.textContent = '已采集';
+    } else {
+      showToast(result.error || '采集失败', 'error');
+      button.textContent = defaultText;
+      button.disabled = false;
+    }
+  });
+
+  buttonContainer.classList.add(PAGE_UI_CLASS);
+  buttonContainer.dataset.zlPageType = 'post_detail';
+  buttonContainer.style.cssText = 'z-index: 99; display: inline-flex; align-items: center;';
+  anchor.prepend(buttonContainer);
+  injectedUI = buttonContainer;
+}
+
+function findDouyinDetailContainer(): Element | null {
+  const postId = getDouyinPostIdFromUrl();
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('article, section, main, div'));
+
+  const scored = candidates
+    .map((el) => {
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length < 20) return null;
+
+      let score = 0;
+      if (postId && text.includes(postId)) score += 3;
+      if (text.includes('发布时间')) score += 4;
+      if (text.includes('相关推荐')) score += 2;
+      if (text.includes('评论')) score += 1;
+      if (text.includes('关注')) score += 1;
+      if (text.includes('粉丝')) score += 1;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 120 || rect.height < 40) score -= 2;
+      if (rect.width > window.innerWidth * 0.95 && rect.height > window.innerHeight * 0.9) score -= 3;
+
+      return score > 0 ? { el, score, area: rect.width * rect.height } : null;
+    })
+    .filter((item): item is { el: HTMLElement; score: number; area: number } => item !== null)
+    .sort((a, b) => b.score - a.score || a.area - b.area);
+
+  return scored[0]?.el || null;
 }
 
 function injectAuthorPageUI() {
-  if (currentPageType !== 'author_profile' || document.querySelector(PAGE_UI_SELECTOR)) return;
+  if (currentPageType !== 'author_profile' || document.querySelector(getPageUISelector('author_profile'))) return;
 
   const selectors = [
     '[data-e2e="user-info"]',
@@ -441,17 +1104,13 @@ function injectAuthorPageUI() {
     return;
   }
 
-  const button = createCollectButton('采集作者', async () => {
+  const { container: buttonContainer, button } = createCollectButton('采集作者', async () => {
     button.textContent = '采集中...';
-    (button as HTMLButtonElement).disabled = true;
+    button.disabled = true;
 
     // 尝试从当前 URL 或缓存中获取作者 ID
     const authorPath = getDouyinAuthorPathInfo();
-    const authorIdFromPath = authorPath?.id;
-    const cachedAuthor = authorIdFromPath ? collectedAuthors.get(authorIdFromPath) : null;
-
-    // 兜底：从 DOM 中提取
-    const author = cachedAuthor || extractAuthorFromDOM(authorPath);
+    const author = await ensureCurrentDouyinAuthor(authorPath);
 
     if (author) {
       const response = await sendMessage('collect:author', {
@@ -465,19 +1124,19 @@ function injectAuthorPageUI() {
       } else {
         showToast('采集失败: ' + response.error, 'error');
         button.textContent = '采集作者';
-        (button as HTMLButtonElement).disabled = false;
+        button.disabled = false;
       }
     } else {
       showToast('数据加载中，请稍后重试', 'info');
       button.textContent = '采集作者';
-      (button as HTMLButtonElement).disabled = false;
+      button.disabled = false;
     }
   });
 
-  button.classList.add(PAGE_UI_CLASS);
-  button.dataset.zlPageType = 'author_profile';
-  container.appendChild(button);
-  injectedUI = button;
+  buttonContainer.classList.add(PAGE_UI_CLASS);
+  buttonContainer.dataset.zlPageType = 'author_profile';
+  container.appendChild(buttonContainer);
+  injectedUI = buttonContainer;
 }
 
 function getDouyinAuthorPathInfo(url = window.location.href): DouyinAuthorPathInfo | null {
@@ -501,7 +1160,7 @@ function extractAuthorFromDOM(authorPath?: DouyinAuthorPathInfo | null): Partial
   const name = nameEl?.textContent?.trim() || '';
   const avatar = avatarEl?.src || '';
 
-  if (authorPath.isSecUid || (!name && !avatar)) {
+  if (!name && !avatar) {
     return null;
   }
 
@@ -530,6 +1189,7 @@ function extractAuthorFromDOM(authorPath?: DouyinAuthorPathInfo | null): Partial
 function injectListPageUI() {
   const selectors = [
     '[data-e2e="recommend-list-item"]',
+    '[data-e2e-vid]',
     '.video-card',
     '.aweme-card',
     '.xg_player',
@@ -546,7 +1206,6 @@ function injectListPageUI() {
   }
 
   if (!videoContainer || videoContainer.length === 0) {
-    setTimeout(injectListPageUI, 500);
     return;
   }
 
@@ -582,43 +1241,156 @@ function injectListPageUI() {
       e.preventDefault();
       e.stopPropagation();
 
-      const link = video.querySelector('a[href*="/video/"]') as HTMLAnchorElement;
-      if (!link) {
-        showToast('无法获取视频链接', 'error');
-        return;
-      }
-
-      const postId = link.href.match(/\/video\/(\d+)/)?.[1];
+      const postId = getDouyinPostIdFromElement(video);
       if (!postId) {
-        showToast('无法获取视频ID', 'error');
+        showToast('无法获取作品ID', 'error');
         return;
       }
 
-      const cachedPost = collectedPosts.get(postId);
-      if (cachedPost) {
-        button.innerHTML = '采集中...';
-        const response = await sendMessage('collect:post', {
-          platform: 'douyin',
-          post: cachedPost
-        });
-
-        if (response.success) {
-          showToast('已保存到本地', 'success');
-          button.innerHTML = '已采集';
-        } else {
-          showToast('采集失败: ' + response.error, 'error');
-          button.innerHTML = '采集';
-        }
+      button.innerHTML = '采集中...';
+      const result = await collectDouyinPostById(postId);
+      if (result.success) {
+        showToast('已保存到本地', 'success');
+        button.innerHTML = '已采集';
       } else {
-        showToast('数据加载中，请稍后重试', 'info');
+        showToast(result.error || '采集失败', 'error');
+        button.innerHTML = '采集';
       }
     });
   });
 }
 
+function injectCurrentPostFloatingUI() {
+  if (!['feed_list', 'search_result'].includes(currentPageType)) return;
+  injectCurrentPostFallbackUI();
+}
+
+function injectCurrentPostFallbackUI() {
+  if (document.querySelector(getPageUISelector('post_detail'))) return;
+
+  const activeAnchor = findDouyinPostActionAnchor();
+  if (activeAnchor) {
+    injectPostActionUI(activeAnchor, getDouyinActivePostId());
+    return;
+  }
+
+  const { container, button } = createCollectButton('采集当前作品', async () => {
+    button.textContent = '采集中...';
+    button.disabled = true;
+
+    const postId = getDouyinActivePostId() || currentVisiblePostId;
+    const result = await collectDouyinPostById(postId);
+
+    if (result.success) {
+      showToast('已保存到本地', 'success');
+      button.textContent = '已采集';
+      return;
+    }
+
+    showToast(result.error || '采集失败', 'error');
+    button.textContent = '采集当前作品';
+    button.disabled = false;
+  });
+
+  container.classList.add(PAGE_UI_CLASS);
+  container.dataset.zlPageType = 'post_detail';
+  container.style.cssText = `
+    position: fixed;
+    right: 24px;
+    bottom: 96px;
+    z-index: 2147483647;
+  `;
+  document.documentElement.appendChild(container);
+  injectedUI = container;
+}
+
+function findCurrentDouyinPost(): Partial<PostEntity> | null {
+  const activePostId = getDouyinActivePostId();
+  if (activePostId) {
+    currentVisiblePostId = activePostId;
+    const fromActive = collectedPosts.get(activePostId);
+    if (fromActive) return fromActive;
+  }
+
+  const visiblePostId = getVisibleDouyinPostId();
+  if (visiblePostId) {
+    currentVisiblePostId = visiblePostId;
+    const fromVisible = collectedPosts.get(visiblePostId);
+    if (fromVisible) return fromVisible;
+  }
+
+  if (currentVisiblePostId) {
+    const fromLastVisible = collectedPosts.get(currentVisiblePostId);
+    if (fromLastVisible) return fromLastVisible;
+  }
+
+  return getMostRecentDouyinPost();
+}
+
+function getVisibleDouyinPostId(): string | null {
+  const visibleText = Array.from(document.querySelectorAll<HTMLElement>('article, section, main, div'))
+    .map((el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < 0 || rect.top > window.innerHeight || rect.width < 200 || rect.height < 80) {
+        return '';
+      }
+      return (el.textContent || '').replace(/\s+/g, ' ').trim();
+    })
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 5000);
+
+  if (!visibleText) return null;
+
+  let best: { id: string; score: number } | null = null;
+  for (const [id, post] of collectedPosts.entries()) {
+    if (!post?.title && !post?.content) continue;
+    const title = (post.title || post.content || '').slice(0, 32);
+    if (!title || title.length < 4) continue;
+
+    const score = visibleText.includes(title)
+      ? title.length
+      : longestCommonSubstringLength(visibleText, title);
+
+    if (score >= 6 && (!best || score > best.score)) {
+      best = { id, score };
+    }
+  }
+
+  return best?.id || null;
+}
+
+function longestCommonSubstringLength(a: string, b: string): number {
+  const left = a.slice(0, 5000);
+  const right = b.slice(0, 80);
+  const dp = new Array(right.length + 1).fill(0);
+  let max = 0;
+
+  for (let i = 1; i <= left.length; i++) {
+    for (let j = right.length; j >= 1; j--) {
+      if (left[i - 1] === right[j - 1]) {
+        dp[j] = dp[j - 1] + 1;
+        if (dp[j] > max) max = dp[j];
+      } else {
+        dp[j] = 0;
+      }
+    }
+  }
+
+  return max;
+}
+
+function getMostRecentDouyinPost(): Partial<PostEntity> | null {
+  const posts = Array.from(collectedPosts.values()).filter((post) => post?.postId);
+  return posts.length > 0 ? posts[posts.length - 1] : null;
+}
+
 // ==================== UI 工具函数 ====================
 
-function createCollectButton(text: string, onClick: () => void): HTMLElement {
+function createCollectButton(
+  text: string,
+  onClick: () => void
+): { container: HTMLElement; button: HTMLButtonElement } {
   const container = document.createElement('div');
   const shadow = container.attachShadow({ mode: 'open' });
 
@@ -642,10 +1414,10 @@ function createCollectButton(text: string, onClick: () => void): HTMLElement {
     <button>${text}</button>
   `;
 
-  const button = shadow.querySelector('button');
-  button?.addEventListener('click', onClick);
+  const button = shadow.querySelector('button') as HTMLButtonElement;
+  button.addEventListener('click', onClick);
 
-  return container;
+  return { container, button };
 }
 
 function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {

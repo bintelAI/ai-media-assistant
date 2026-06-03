@@ -148,38 +148,41 @@ async function handleApiCall(path: string, data: Record<string, unknown>): Promi
 }
 
 
+function getXhsPayload(data: any): any | null {
+  if (!data) return null;
+  if (typeof data === 'object' && 'code' in data && data.code !== 0) return null;
+  return data.data ?? data;
+}
+
 function handleApiData(url: string, data: any) {
-  console.log(url,data,'检测数据')
-   if (!data || !data.data) return;
+  const payload = getXhsPayload(data);
+  if (!payload) return;
   
   console.log('[智联AI] 拦截到数据:', url.split('?')[0]);
   
   if (url.includes('/api/sns/web/v1/homefeed') || url.includes('/api/sns/web/v1/search/notes') || url.includes('/api/sns/web/v1/feed')) {
-    handleFeedData(data);
+    handleFeedData(payload);
   } else if (url.includes('/api/sns/web/v1/user_posted')) {
-    handleUserPostsData(data);
+    handleUserPostsData(payload);
   } else if (url.includes('/api/sns/web/v2/note/') || url.includes('/api/sns/web/v1/note/')) {
-    handleNoteDetailData(data);
+    handleNoteDetailData(payload);
   } else if (url.includes('/api/sns/web/v2/user/') || url.includes('/api/sns/web/v1/user/')) {
-    console.log(data,99)
-    handleUserData(data);
+    handleUserData(payload);
   }
-  if (url.includes('/api/sns/web/v2/comment/page')) {
-    console.log(data,'评论数据')
-    handleCommentData(data);
+  if (url.includes('/api/sns/web/v2/comment/page') || url.includes('/api/sns/web/v1/comment/page')) {
+    handleCommentData(payload);
   }
 }
 
 function handleFeedData(data: any) {
-  console.log(data,111111)
-  const items = data.data?.items || data.data?.notes || [];
+  const items = data?.items || data?.notes || [];
   let count = 0;
   
   items.forEach((item: any) => {
     const note = item.note || item.note_card || item;
     const postData = extractPostData(note);
     if (postData?.postId) {
-      collectedPosts.set(postData.postId, postData);
+      cacheXhsPost(postData);
       count++;
     }
   });
@@ -191,15 +194,14 @@ function handleFeedData(data: any) {
 }
 
 function handleUserPostsData(data: any) {
-  console.log(data,22222)
-  const notes = data.data?.notes || [];
+  const notes = data?.notes || [];
   let count = 0;
   
   notes.forEach((noteItem: any) => {
     const note = noteItem.note || noteItem;
     const postData = extractPostData(note);
     if (postData?.postId) {
-      collectedPosts.set(postData.postId, postData);
+      cacheXhsPost(postData);
       count++;
     }
   });
@@ -211,21 +213,20 @@ function handleUserPostsData(data: any) {
 }
 
 function handleNoteDetailData(data: any) {
-  const note = data.data?.note;
+  const note = data?.note || data;
   const postData = extractPostData(note);
   if (postData?.postId) {
-    collectedPosts.set(postData.postId, postData);
+    cacheXhsPost(postData);
     console.log(`[智联AI] 缓存帖子详情: ${postData.postId}`);
   }
 }
 
 function handleUserData(data: any) {
-  const user = data.data?.user || data.data;
-  if (!user?.userId) return;
+  const user = data?.user || data?.user_info || data;
   
   const authorData = extractAuthorData(user);
   if (authorData) {
-    collectedAuthors.set(user.userId, authorData);
+    cacheXhsAuthor(authorData);
     console.log(`[智联AI] 缓存用户数据: ${user.userId} - ${authorData.name}`);
   }
 }
@@ -235,9 +236,8 @@ function handleUserData(data: any) {
  * @param data 评论接口返回的数据
  */
 function handleCommentData(data: any) {
-  const comments = data.data?.comments || [];
+  const comments = data?.comments || data?.items || [];
   let count = 0;
-  console.log(comments,333333)
   comments.forEach((comment: any) => {
     const commentData = extractCommentData(comment);
     if (commentData?.commentId) {
@@ -322,11 +322,27 @@ function sanitizeUrl(value: unknown): string | undefined {
 function normalizeXhsUser(raw: any): { userId?: string; nickname?: string; name?: string; avatar?: string } {
   if (!raw || typeof raw !== 'object') return {};
   return {
-    userId: raw.userId ?? raw.user_id ?? raw.id,
+    userId: raw.userId ?? raw.user_id ?? raw.id ?? raw.userid,
     nickname: raw.nickname ?? raw.nick_name,
     name: raw.name,
     avatar: raw.avatar ?? raw.image,
   };
+}
+
+function cacheXhsPost(post: Partial<PostEntity>) {
+  if (post.postId) {
+    collectedPosts.set(post.postId, post);
+  }
+}
+
+function getXhsAuthorId(user: any): string {
+  return String(user?.userId ?? user?.user_id ?? user?.id ?? user?.userid ?? '').trim();
+}
+
+function cacheXhsAuthor(author: Partial<AuthorEntity>) {
+  if (author.authorId) {
+    collectedAuthors.set(author.authorId, author);
+  }
 }
 
 function normalizeXhsInteractInfo(raw: any): {
@@ -408,14 +424,15 @@ function extractPostData(note: any): Partial<PostEntity> | null {
 }
 
 function extractAuthorData(user: any): Partial<AuthorEntity> | null {
-  if (!user?.userId) return null;
+  const authorId = getXhsAuthorId(user);
+  if (!authorId) return null;
   
   const authorData = {
     platform: 'xhs' as const,
-    authorId: user.userId,
-    name: user.nickname || user.name || '',
+    authorId,
+    name: user.nickname || user.nick_name || user.name || '',
     avatar: user.image || user.avatar,
-    profileUrl: `https://www.xiaohongshu.com/user/profile/${user.userId}`,
+    profileUrl: `https://www.xiaohongshu.com/user/profile/${authorId}`,
     bio: user.desc || user.bio,
     fansCount: user.fansCount || user.fans,
     followCount: user.followCount || user.follows,
@@ -460,6 +477,66 @@ function debouncedSaveComments() {
   }, 1000);
 }
 
+function ensureCurrentXhsPost(postId?: string | null): Partial<PostEntity> | null {
+  if (!postId) return null;
+
+  const cachedPost = collectedPosts.get(postId);
+  if (cachedPost) return cachedPost;
+
+  const state = (window as any).__INITIAL_STATE__;
+  if (state) {
+    extractPostFromState(state);
+    const fromState = collectedPosts.get(postId);
+    if (fromState) return fromState;
+  }
+
+  return null;
+}
+
+function getCurrentXhsNoteParams(): { noteId: string | null; xsecSource?: string; xsecToken?: string } {
+  const url = new URL(window.location.href);
+  const noteId = url.pathname.match(/\/explore\/([\w]+)/)?.[1] || null;
+  return {
+    noteId,
+    xsecSource: url.searchParams.get('xsec_source') || undefined,
+    xsecToken: url.searchParams.get('xsec_token') || undefined
+  };
+}
+
+async function fetchCurrentXhsPostViaApi(postId: string): Promise<Partial<PostEntity> | null> {
+  const { fetchXhsNoteDetail } = await import('@/shared/services/xhs-user-service');
+  const params = getCurrentXhsNoteParams();
+  const postData = await fetchXhsNoteDetail(
+    postId,
+    params.xsecSource,
+    params.xsecToken,
+    window.location.href
+  );
+
+  if (postData?.postId) {
+    collectedPosts.set(postData.postId, postData);
+    return postData;
+  }
+
+  return null;
+}
+
+function ensureCurrentXhsAuthor(authorId?: string | null): Partial<AuthorEntity> | null {
+  if (!authorId) return null;
+
+  const cachedAuthor = collectedAuthors.get(authorId);
+  if (cachedAuthor) return cachedAuthor;
+
+  const state = (window as any).__INITIAL_STATE__;
+  if (state) {
+    extractAuthorFromState(state);
+    const fromState = collectedAuthors.get(authorId);
+    if (fromState) return fromState;
+  }
+
+  return extractAuthorFromDom(authorId);
+}
+
 function onPageLoaded() {
   console.log('[智联AI] 页面加载完成:', currentPageType,43243);
   
@@ -491,7 +568,51 @@ function extractPostFromState(state: any) {
   }
 }
 
+function getXhsUserPageInfoFromState(state: any): any {
+  return state?.user?.userPageInfo ||
+    state?.userPageInfo ||
+    state?.user?.userPageData?.value ||
+    state?.userPageData?.value;
+}
+
+function buildAuthorFromUserPageInfo(userInfo: any): Partial<AuthorEntity> | null {
+  if (!userInfo) return null;
+
+  const basicInfo = userInfo.basicInfo || userInfo.basic_info || userInfo;
+  const authorId = getXhsAuthorId(basicInfo);
+  if (!authorId) return null;
+
+  const interactions = userInfo.interactions || userInfo.interactionList || [];
+  const getInteraction = (name: string): number | undefined => {
+    const item = Array.isArray(interactions) ? interactions.find((i: any) => i.name === name) : null;
+    return item?.count;
+  };
+
+  return {
+    platform: 'xhs',
+    authorId,
+    name: basicInfo.nickname || basicInfo.nick_name || basicInfo.name || '',
+    avatar: basicInfo.image || basicInfo.avatar,
+    profileUrl: `https://www.xiaohongshu.com/user/profile/${authorId}`,
+    bio: basicInfo.desc || basicInfo.bio,
+    fansCount: basicInfo.fansCount ?? basicInfo.fans ?? interactions?.[0]?.count,
+    followCount: basicInfo.followCount ?? basicInfo.follows ?? interactions?.[1]?.count,
+    likedCount: basicInfo.likedCount ?? basicInfo.liked ?? interactions?.[2]?.count,
+    workCount: basicInfo.noteCount || basicInfo.notesCount,
+    location: basicInfo.location,
+    verified: !!basicInfo.verified,
+    verifiedDesc: basicInfo.verifiedInfo?.desc || basicInfo.verifiedDesc,
+    sourcePageUrl: window.location.href
+  };
+}
+
 function extractAuthorFromState(state: any) {
+  const authorDataFromAnyState = buildAuthorFromUserPageInfo(getXhsUserPageInfoFromState(state));
+  if (authorDataFromAnyState?.authorId) {
+    cacheXhsAuthor(authorDataFromAnyState);
+    return;
+  }
+
   console.log('[智联AI] 从页面状态提取用户信息:', state);
   const userInfo = state?.user?.userPageInfo || state?.userPageInfo;
   console.log('[智联AI] 提取到的 userInfo:', userInfo);
@@ -626,6 +747,7 @@ function cleanupUIForPageChange(nextPageType: PageType) {
 
   if (nextPageType === 'author_profile') {
     removePageUIByType('post_detail');
+    removePageUIByType('author_profile');
     return;
   }
 
@@ -707,8 +829,12 @@ function injectPostPageUI() {
     collectPostBtn.textContent = '采集中...';
     collectPostBtn.disabled = true;
     
-    const postId = window.location.pathname.split('/').pop();
-    const cachedPost = postId ? collectedPosts.get(postId) : null;
+    const { noteId: postId } = getCurrentXhsNoteParams();
+    let cachedPost = ensureCurrentXhsPost(postId);
+
+    if (!cachedPost && postId) {
+      cachedPost = await fetchCurrentXhsPostViaApi(postId);
+    }
     
     if (cachedPost) {
       const response = await sendMessage('collect:post', {
@@ -834,7 +960,7 @@ function injectAuthorPageUI() {
       collectAuthorBtn.disabled = true;
       
       const authorId = window.location.pathname.split('/').pop();
-      const cachedAuthor = authorId ? (collectedAuthors.get(authorId) ?? extractAuthorFromDom(authorId)) : null;
+      const cachedAuthor = ensureCurrentXhsAuthor(authorId);
       
       if (cachedAuthor) {
         const response = await sendMessage('collect:author', {

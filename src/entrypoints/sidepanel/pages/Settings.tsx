@@ -7,19 +7,19 @@ import {
   checkConnection,
   clearSheetTarget,
   getConfig,
+  getDimensLoadErrorMessage,
   saveConfig,
   getTeamIds,
   listProjects,
   listSheets,
-  listColumns,
   createNewProject,
   createStandardSheetForType,
-  ensureColumns,
   getProjectInfo,
   getSheetConfig,
   openDimensLoginPage,
   logout,
   onDimensAuthChanged,
+  repairSheetStructure,
   saveSheetTarget,
   DEFAULT_TEAM_ID,
   DEFAULT_PROJECT_NAME,
@@ -63,6 +63,8 @@ export default function Settings() {
   const [selectedSheetTarget, setSelectedSheetTarget] = useState<DimensSheetTarget | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
+  const [projectLoadError, setProjectLoadError] = useState('');
+  const [sheetLoadError, setSheetLoadError] = useState('');
   const [updatingSheet, setUpdatingSheet] = useState(false);
   const [fieldStatus, setFieldStatus] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
@@ -102,6 +104,8 @@ export default function Settings() {
       setTeamIds([]);
       setProjects([]);
       setSheets([]);
+      setProjectLoadError('');
+      setSheetLoadError('');
       setSelectedSheetId('');
       setSelectedSheetTarget(null);
       setFieldStatus('');
@@ -110,11 +114,13 @@ export default function Settings() {
 
   const loadProjects = async (teamId?: string) => {
     setLoadingProjects(true);
+    setProjectLoadError('');
     try {
       const list = await listProjects(teamId);
       setProjects(list);
-    } catch {
+    } catch (e) {
       setProjects([]);
+      setProjectLoadError(getDimensLoadErrorMessage(e, 'project'));
     } finally {
       setLoadingProjects(false);
     }
@@ -123,15 +129,18 @@ export default function Settings() {
   const loadSheets = async (projectId?: string) => {
     if (!projectId) {
       setSheets([]);
+      setSheetLoadError('');
       return;
     }
 
     setLoadingSheets(true);
+    setSheetLoadError('');
     try {
       const list = await listSheets(projectId);
       setSheets(list);
-    } catch {
+    } catch (e) {
       setSheets([]);
+      setSheetLoadError(getDimensLoadErrorMessage(e, 'sheet'));
     } finally {
       setLoadingSheets(false);
     }
@@ -166,6 +175,8 @@ export default function Settings() {
       setConnectionStatus('disconnected');
       setStatusMessage(e.message || '未登录维表智联');
       setSheets([]);
+      setProjectLoadError('');
+      setSheetLoadError('');
       setSelectedSheetId('');
       setSelectedSheetTarget(null);
       setFieldStatus('');
@@ -200,6 +211,8 @@ export default function Settings() {
       setTeamIds([]);
       setProjects([]);
       setSheets([]);
+      setProjectLoadError('');
+      setSheetLoadError('');
       setSelectedSheetId('');
       setSelectedSheetTarget(null);
       setFieldStatus('');
@@ -214,6 +227,7 @@ export default function Settings() {
     setCurrentProjectId('');
     setCurrentProjectName(DEFAULT_PROJECT_NAME);
     setSheets([]);
+    setSheetLoadError('');
     setSelectedSheetId('');
     setSelectedSheetTarget(null);
     setFieldStatus('');
@@ -228,6 +242,7 @@ export default function Settings() {
     setCurrentProjectName(project.name);
     setSelectedSheetId('');
     setSelectedSheetTarget(null);
+    setSheetLoadError('');
     setFieldStatus('');
     await saveConfig({ teamId: currentTeamId, projectId: project.id, projectName: project.name, sheetTargets: {} });
     await loadSheets(project.id);
@@ -241,6 +256,7 @@ export default function Settings() {
       setCurrentProjectName(project.name);
       setSelectedSheetId('');
       setSelectedSheetTarget(null);
+      setSheetLoadError('');
       setFieldStatus('');
       await saveConfig({ teamId: currentTeamId, projectId: project.id, projectName: project.name, sheetTargets: {} });
       setNewProjectName('');
@@ -298,16 +314,19 @@ export default function Settings() {
     try {
       setUpdatingSheet(true);
       setFieldStatus('正在补齐标准字段...');
-      const ensured = await ensureColumns(currentTeamId, currentProjectId, selectedSheetId, selectedSheetType);
       const sheet = sheets.find((item) => item.sheetId === selectedSheetId);
+      const ensured = await repairSheetStructure(currentTeamId, currentProjectId, selectedSheetId, selectedSheetType, sheet?.name);
       if (sheet) {
-        const columns = await listColumns(currentTeamId, currentProjectId, selectedSheetId);
-        const target = await saveSheetTarget(selectedSheetType, { ...sheet, columns });
+        const target = await saveSheetTarget(selectedSheetType, sheet);
         setSelectedSheetTarget(target);
       }
-      setFieldStatus(ensured.missing.length > 0
-        ? `仍缺少字段：${ensured.missing.join('、')}`
-        : `字段已补齐，新增字段 ${ensured.created.length} 个`);
+      if (ensured.missing.length > 0) {
+        setFieldStatus(`仍缺少字段：${ensured.missing.join('、')}`);
+      } else if (ensured.health.status === 'risk') {
+        setFieldStatus(`字段已补齐，但存在类型不一致：${ensured.health.warnings.slice(0, 2).join('；')}`);
+      } else {
+        setFieldStatus(`字段与默认视图已补齐，新增/修复 ${ensured.created.length} 项`);
+      }
     } catch (e: any) {
       setFieldStatus(e.message || '补齐字段失败');
     } finally {
@@ -483,6 +502,17 @@ export default function Settings() {
                 <label className="mb-1 block text-xs font-medium text-slate-600">项目</label>
                 {loadingProjects ? (
                   <p className="py-1.5 text-xs text-slate-500">加载中...</p>
+                ) : projectLoadError ? (
+                  <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
+                    <p className="leading-5">{projectLoadError}</p>
+                    <button
+                      type="button"
+                      onClick={() => loadProjects(currentTeamId)}
+                      className="mt-1 inline-flex min-h-[30px] items-center gap-1 font-medium text-rose-700 hover:text-rose-800"
+                    >
+                      <RefreshCw className="h-3 w-3" />重新加载项目
+                    </button>
+                  </div>
                 ) : projects.length > 0 ? (
                   <div className="space-y-1.5">
                     <div className="relative">
@@ -568,6 +598,17 @@ export default function Settings() {
                   <label className="mb-1 block text-xs font-medium text-slate-600">{SHEET_TYPE_LABELS[selectedSheetType]}目标表</label>
                   {loadingSheets ? (
                     <p className="py-1.5 text-xs text-slate-500">正在加载表...</p>
+                  ) : sheetLoadError ? (
+                    <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
+                      <p className="leading-5">{sheetLoadError}</p>
+                      <button
+                        type="button"
+                        onClick={() => loadSheets(currentProjectId)}
+                        className="mt-1 inline-flex min-h-[30px] items-center gap-1 font-medium text-rose-700 hover:text-rose-800"
+                      >
+                        <RefreshCw className="h-3 w-3" />重新加载表
+                      </button>
+                    </div>
                   ) : currentProjectId ? (
                     <div className="space-y-2">
                       <div className="relative">

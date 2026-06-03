@@ -87,13 +87,16 @@ export function parseUrl(url: string): ParsedUrl | null {
  * @returns 解析后的URL信息
  */
 function parseXhsUrl(url: string): ParsedUrl | null {
-  const postMatch = url.match(/xiaohongshu\.com\/explore\/([\w]+)/);
+  const postMatch = url.match(/xiaohongshu\.com\/(?:explore|discovery\/item)\/([\w]+)/);
   if (postMatch) {
+    const urlObj = new URL(url);
     return {
       platform: 'xhs' as Platform,
       pageType: 'post_detail' as PageType,
       id: postMatch[1],
-      originalUrl: url
+      originalUrl: url,
+      xsecSource: urlObj.searchParams.get('xsec_source') || undefined,
+      xsecToken: urlObj.searchParams.get('xsec_token') || undefined
     };
   }
 
@@ -119,12 +122,14 @@ function parseXhsUrl(url: string): ParsedUrl | null {
  * @returns 解析后的URL信息
  */
 function parseDouyinUrl(url: string): ParsedUrl | null {
-  const videoMatch = url.match(/douyin\.com\/video\/(\d+)/);
-  if (videoMatch) {
+  const modalMatch = url.match(/[?&]modal_id=(\d+)/);
+  const videoMatch = url.match(/douyin\.com\/(?:video|note)\/(\d+)/);
+  const postId = modalMatch?.[1] || videoMatch?.[1];
+  if (postId) {
     return {
       platform: 'douyin' as Platform,
       pageType: 'post_detail' as PageType,
-      id: videoMatch[1],
+      id: postId,
       originalUrl: url
     };
   }
@@ -290,9 +295,9 @@ export function getPlatformDisplayName(platform: Platform): string {
  * @param pageType 页面类型
  * @returns 页面类型显示名称
  */
-export function getPageTypeDisplayName(pageType: PageType): string {
+export function getPageTypeDisplayName(pageType: PageType, platform?: Platform): string {
   const names: Record<PageType, string> = {
-    post_detail: '帖子详情',
+    post_detail: platform === 'douyin' ? '作品详情' : '帖子详情',
     author_profile: '用户主页',
     comments_page: '评论页',
     feed_list: '推荐列表',

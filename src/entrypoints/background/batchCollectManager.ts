@@ -2,8 +2,9 @@ import { resolveShortUrls, type ShortUrlResolveResult } from '@/shared/services/
 import { addAuthor } from '@/shared/db/authors';
 import { addPost } from '@/shared/db/posts';
 import { addTask, updateTask } from '@/shared/db/tasks';
-import { fetchUserOtherInfo } from '@/shared/services/xhs-user-service';
+import { fetchUserOtherInfo, fetchXhsNoteDetail } from '@/shared/services/xhs-user-service';
 import { fetchPgyCreatorInfo, fetchPgyPostDetail } from '@/shared/services/pgy-user-service';
+import { ensureDouyinApiContext, fetchDouyinAuthorInfo, fetchDouyinAwemeDetail } from '@/shared/services/douyin-user-service';
 import { ChromeStorage } from '@/shared/utils/storage';
 import {
   DEFAULT_SETTINGS,
@@ -80,12 +81,50 @@ export class BatchCollectManager {
     const resolveResults = await resolveShortUrls(urls);
     console.log('[BatchCollectManager] 短链解析完成', resolveResults.length, '个URL');
 
+    const invalidResolveResults = resolveResults.filter((r) =>
+      !r.success || r.parsed === undefined || r.parsed.id === ''
+    );
     const validResolveResults = resolveResults.filter((r): r is ShortUrlResolveResult & { parsed: ParsedUrl } =>
       r.success && r.parsed !== undefined && r.parsed.id !== ''
     );
 
     const unsupportedResults = validResolveResults.filter((r) => !this.canUseApiCollect(r.parsed));
-    const supportedResolveResults = validResolveResults.filter((r) => this.canUseApiCollect(r.parsed));
+    let supportedResolveResults = validResolveResults.filter((r) => this.canUseApiCollect(r.parsed));
+    let skippedResults: CollectResult[] = [
+      ...invalidResolveResults.map((result) => ({
+        success: false,
+        url: result.originalUrl,
+        error: result.error || '无法解析该URL'
+      })),
+      ...unsupportedResults.map((result) => ({
+        success: false,
+        url: result.originalUrl,
+        error: this.getUnsupportedReason(result.parsed)
+      }))
+    ];
+
+    if (supportedResolveResults.some((result) => result.parsed.platform === 'douyin')) {
+      const check = await ensureDouyinApiContext();
+      if (!check.ok) {
+        const douyinError = check.error || '抖音页面未就绪，请登录或刷新抖音页面后重试';
+        const douyinSkipped = supportedResolveResults
+          .filter((result) => result.parsed.platform === 'douyin')
+          .map((result) => ({
+            success: false,
+            url: result.originalUrl,
+            error: douyinError
+          }));
+
+        skippedResults = [...skippedResults, ...douyinSkipped];
+        supportedResolveResults = supportedResolveResults.filter((result) => result.parsed.platform !== 'douyin');
+        this.progress = {
+          ...this.progress,
+          failed: skippedResults.length,
+          results: skippedResults,
+        };
+        this.notifyProgress();
+      }
+    }
 
     if (supportedResolveResults.length === 0) {
       console.warn('[BatchCollectManager] 没有可采集的URL');
@@ -96,7 +135,7 @@ export class BatchCollectManager {
         failed: urls.length,
         currentUrl: '',
         status: 'error',
-        results: urls.map((url) => ({
+        results: skippedResults.length > 0 ? skippedResults : urls.map((url) => ({
           success: false,
           url,
           error: '无法解析或暂不支持该URL'
@@ -118,7 +157,7 @@ export class BatchCollectManager {
     this.isRunning = true;
     this.isPaused = false;
     this.currentIndex = 0;
-    this.skippedBeforeQueue = unsupportedResults.length;
+    this.skippedBeforeQueue = skippedResults.length;
     this.progress = {
       total: this.taskQueue.length + this.skippedBeforeQueue,
       current: this.skippedBeforeQueue,
@@ -126,13 +165,9 @@ export class BatchCollectManager {
       failed: 0,
       currentUrl: '',
       status: 'running',
-      results: unsupportedResults.map((result) => ({
-        success: false,
-        url: result.originalUrl,
-        error: this.getUnsupportedReason(result.parsed)
-      }))
+      results: skippedResults
     };
-    this.progress.failed = unsupportedResults.length;
+    this.progress.failed = skippedResults.length;
 
     this.abortController = new AbortController();
 
@@ -179,7 +214,7 @@ export class BatchCollectManager {
       this.notifyProgress();
 
       try {
-        const result = await this.collectTask(task);
+        const result = await this.collectTaskWithRetry(task);
 
         if (result.success) {
           task.status = 'success';
@@ -224,6 +259,18 @@ export class BatchCollectManager {
       return this.collectXhsAuthor(task);
     }
 
+    if (platform === 'xhs' && pageType === 'post_detail') {
+      return this.collectXhsPost(task);
+    }
+
+    if (platform === 'douyin' && pageType === 'author_profile') {
+      return this.collectDouyinAuthor(task);
+    }
+
+    if (platform === 'douyin' && pageType === 'post_detail') {
+      return this.collectDouyinPost(task);
+    }
+
     if (platform === 'pgy' && pageType === 'author_profile') {
       return this.collectPgyAuthor(task);
     }
@@ -239,6 +286,35 @@ export class BatchCollectManager {
     };
   }
 
+  private async collectTaskWithRetry(task: CollectTask): Promise<CollectResult> {
+    let lastResult: CollectResult | null = null;
+
+    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+      task.retryCount = attempt;
+
+      if (attempt > 0) {
+        const interval = Math.min(1000 * attempt, 3000);
+        console.log(`[BatchCollectManager] 第 ${attempt + 1} 次重试: ${task.url}`);
+        await this.sleep(interval);
+      }
+
+      lastResult = await this.collectTask(task);
+      if (lastResult.success) {
+        return lastResult;
+      }
+
+      if (this.abortController?.signal.aborted) {
+        return lastResult;
+      }
+    }
+
+    return lastResult ?? {
+      success: false,
+      url: task.url,
+      error: '采集失败'
+    };
+  }
+
   private canUseApiCollect(parsed: ParsedUrl): boolean {
     return isBatchCollectSupported(parsed.platform, parsed.pageType, this.devMode);
   }
@@ -248,7 +324,7 @@ export class BatchCollectManager {
     if (feature?.status !== 'enabled' && !this.devMode) {
       return `${feature.label}暂未支持`;
     }
-    return '不支持的URL类型，目前批量采集支持小红书作者主页';
+    return '不支持的URL类型，目前批量采集支持小红书、抖音作者主页和帖子/作品详情';
   }
 
   private async applySettings(): Promise<void> {
@@ -296,6 +372,101 @@ export class BatchCollectManager {
         success: false,
         url: task.url,
         error: error instanceof Error ? error.message : 'API采集异常'
+      };
+    }
+  }
+
+  private async collectXhsPost(task: CollectTask): Promise<CollectResult> {
+    console.log(`[BatchCollectManager] 使用小红书API采集帖子: ${task.url}`);
+
+    try {
+      const postData = await fetchXhsNoteDetail(
+        task.parsed.id,
+        task.parsed.xsecSource,
+        task.parsed.xsecToken,
+        task.url
+      );
+
+      if (!postData) {
+        return {
+          success: false,
+          url: task.url,
+          error: 'API获取帖子详情失败'
+        };
+      }
+
+      await addPost(postData as PostEntity);
+
+      return {
+        success: true,
+        url: task.url,
+        data: postData as PostEntity
+      };
+    } catch (error) {
+      return {
+        success: false,
+        url: task.url,
+        error: error instanceof Error ? error.message : 'API帖子采集异常'
+      };
+    }
+  }
+
+  private async collectDouyinAuthor(task: CollectTask): Promise<CollectResult> {
+    console.log(`[BatchCollectManager] 使用抖音 API 采集作者: ${task.url}`);
+
+    try {
+      const authorData = await fetchDouyinAuthorInfo(task.parsed.id);
+
+      if (!authorData) {
+        return {
+          success: false,
+          url: task.url,
+          error: '抖音 API 获取作者信息失败，请确认已登录抖音并刷新抖音页面'
+        };
+      }
+
+      await addAuthor(authorData as AuthorEntity);
+
+      return {
+        success: true,
+        url: task.url,
+        data: authorData as AuthorEntity
+      };
+    } catch (error) {
+      return {
+        success: false,
+        url: task.url,
+        error: error instanceof Error ? error.message : '抖音作者 API 采集异常'
+      };
+    }
+  }
+
+  private async collectDouyinPost(task: CollectTask): Promise<CollectResult> {
+    console.log(`[BatchCollectManager] 使用抖音 API 采集作品: ${task.url}`);
+
+    try {
+      const postData = await fetchDouyinAwemeDetail(task.parsed.id, task.url);
+
+      if (!postData) {
+        return {
+          success: false,
+          url: task.url,
+          error: '抖音 API 获取作品详情失败，请确认已登录抖音并刷新抖音页面'
+        };
+      }
+
+      await addPost(postData as PostEntity);
+
+      return {
+        success: true,
+        url: task.url,
+        data: postData as PostEntity
+      };
+    } catch (error) {
+      return {
+        success: false,
+        url: task.url,
+        error: error instanceof Error ? error.message : '抖音作品 API 采集异常'
       };
     }
   }

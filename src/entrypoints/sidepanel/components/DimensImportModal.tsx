@@ -9,21 +9,21 @@ import {
   createStandardSheetForType,
   DEFAULT_PROJECT_NAME,
   DEFAULT_TEAM_ID,
-  ensureColumns,
   ensureSheetTarget,
   getConfig,
+  getDimensLoadErrorMessage,
   getProjectInfo,
   getSheetConfig,
   getSheetViewUrl,
   getTeamIds,
   importRows,
   isAuthenticated,
-  listColumns,
   listProjects,
   listSheets,
   onDimensAuthChanged,
   openDimensAuthorizedPage,
   openDimensLoginPage,
+  repairSheetStructure,
   saveConfig,
   saveSheetTarget,
   type DimensSheet,
@@ -67,6 +67,8 @@ export default function DimensImportModal() {
   const [showConfig, setShowConfig] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
+  const [projectLoadError, setProjectLoadError] = useState('');
+  const [sheetLoadError, setSheetLoadError] = useState('');
   const [updatingSheet, setUpdatingSheet] = useState(false);
   const [fieldStatus, setFieldStatus] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
@@ -81,10 +83,12 @@ export default function DimensImportModal() {
 
   const loadProjects = async (teamId?: string) => {
     setLoadingProjects(true);
+    setProjectLoadError('');
     try {
       setProjects(await listProjects(teamId));
-    } catch {
+    } catch (e) {
       setProjects([]);
+      setProjectLoadError(getDimensLoadErrorMessage(e, 'project'));
     } finally {
       setLoadingProjects(false);
     }
@@ -93,14 +97,17 @@ export default function DimensImportModal() {
   const loadSheets = async (projectId?: string) => {
     if (!projectId) {
       setSheets([]);
+      setSheetLoadError('');
       return;
     }
 
     setLoadingSheets(true);
+    setSheetLoadError('');
     try {
       setSheets(await listSheets(projectId));
-    } catch {
+    } catch (e) {
       setSheets([]);
+      setSheetLoadError(getDimensLoadErrorMessage(e, 'sheet'));
     } finally {
       setLoadingSheets(false);
     }
@@ -210,6 +217,7 @@ export default function DimensImportModal() {
     setSelectedSheetId('');
     setSelectedSheetTarget(null);
     setSheets([]);
+    setSheetLoadError('');
     setFieldStatus('');
     await saveConfig({ teamId: newTeamId, projectName: DEFAULT_PROJECT_NAME, sheetTargets: {} });
     setProjectInfo(null);
@@ -224,6 +232,7 @@ export default function DimensImportModal() {
     setCurrentProjectName(project.name);
     setSelectedSheetId('');
     setSelectedSheetTarget(null);
+    setSheetLoadError('');
     setFieldStatus('');
     await saveConfig({ teamId: currentTeamId, projectId: project.id, projectName: project.name, sheetTargets: {} });
     setProjectInfo(null);
@@ -285,18 +294,20 @@ export default function DimensImportModal() {
     try {
       setUpdatingSheet(true);
       setFieldStatus('正在补齐标准字段...');
-      const ensured = await ensureColumns(currentTeamId, currentProjectId, selectedSheetId, sheetType);
       const sheet = sheets.find((item) => item.sheetId === selectedSheetId);
+      const ensured = await repairSheetStructure(currentTeamId, currentProjectId, selectedSheetId, sheetType, sheet?.name);
       if (sheet) {
-        const columns = await listColumns(currentTeamId, currentProjectId, selectedSheetId);
-        const target = await saveSheetTarget(sheetType, { ...sheet, columns });
+        const target = await saveSheetTarget(sheetType, sheet);
         setSelectedSheetTarget(target);
       }
       if (ensured.missing.length > 0) {
         setFieldStatus(`仍缺少字段：${ensured.missing.join('、')}`);
         showToast('部分字段补齐失败，请检查字段权限', 'error');
+      } else if (ensured.health.status === 'risk') {
+        setFieldStatus(`字段已补齐，但存在类型不一致：${ensured.health.warnings.slice(0, 2).join('；')}`);
+        showToast('字段已补齐，但旧表存在字段类型风险', 'info');
       } else {
-        setFieldStatus(`字段已补齐，新增字段 ${ensured.created.length} 个`);
+        setFieldStatus(`字段与默认视图已补齐，新增/修复 ${ensured.created.length} 项`);
         showToast('字段已补齐', 'success');
       }
     } catch (e: any) {
@@ -372,6 +383,23 @@ export default function DimensImportModal() {
         const config = await syncConfigState();
         await loadProjects(config.teamId);
         await loadSheets(config.projectId);
+      } else {
+        const repaired = await repairSheetStructure(
+          target.teamId || currentTeamId,
+          target.projectId || currentProjectId,
+          target.sheetId,
+          sheetType,
+          target.sheetName
+        );
+        target = {
+          ...target,
+          fieldMapping: repaired.fieldMapping,
+          fieldBindings: repaired.fieldBindings,
+          healthStatus: repaired.health.status,
+          healthWarnings: repaired.health.warnings,
+          checkedAt: Date.now(),
+        };
+        setSelectedSheetTarget(target);
       }
       const { sheetId, fieldMapping } = target;
 
@@ -541,6 +569,17 @@ export default function DimensImportModal() {
                     <label className="mb-1 block text-xs font-medium text-slate-600">项目</label>
                     {loadingProjects ? (
                       <div className="flex items-center gap-2 py-1.5 text-xs text-slate-500"><Loader2 className="h-3 w-3 animate-spin" />加载项目列表...</div>
+                    ) : projectLoadError ? (
+                      <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
+                        <p className="leading-5">{projectLoadError}</p>
+                        <button
+                          type="button"
+                          onClick={() => loadProjects(currentTeamId)}
+                          className="mt-1 inline-flex min-h-[30px] items-center gap-1 font-medium text-rose-700 hover:text-rose-800"
+                        >
+                          <RefreshCw className="h-3 w-3" />重新加载项目
+                        </button>
+                      </div>
                     ) : projects.length > 0 ? (
                       <div className="space-y-1.5">
                         <div className="relative">
@@ -578,6 +617,17 @@ export default function DimensImportModal() {
                   </div>
                   {loadingSheets ? (
                     <div className="flex items-center gap-2 py-1.5 text-xs text-slate-500"><Loader2 className="h-3 w-3 animate-spin" />加载表列表...</div>
+                  ) : sheetLoadError ? (
+                    <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
+                      <p className="leading-5">{sheetLoadError}</p>
+                      <button
+                        type="button"
+                        onClick={() => loadSheets(currentProjectId)}
+                        className="mt-1 inline-flex min-h-[30px] items-center gap-1 font-medium text-rose-700 hover:text-rose-800"
+                      >
+                        <RefreshCw className="h-3 w-3" />重新加载表
+                      </button>
+                    </div>
                   ) : sheets.length > 0 ? (
                     <div className="relative">
                       <select value={selectedSheetId} disabled={updatingSheet} onChange={(e) => handleSheetSelect(e.target.value)} className="min-h-[40px] w-full appearance-none rounded-md border border-slate-300 bg-white px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50">

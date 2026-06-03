@@ -35,6 +35,9 @@ export interface DimensSheetTarget {
   projectId?: string;
   projectName?: string;
   fieldMapping: Record<string, string>;
+  fieldBindings?: Record<string, DimensFieldBinding>;
+  healthStatus?: DimensSheetHealthStatus;
+  healthWarnings?: string[];
   upsertKeys: string[];
   checkedAt: number;
 }
@@ -56,6 +59,42 @@ export interface DimensColumn {
   label: string;
   type: string;
   config?: Record<string, any>;
+}
+
+export type DimensSheetHealthStatus = 'ok' | 'repairable' | 'risk' | 'blocked';
+
+export interface DimensFieldBinding {
+  key: string;
+  label: string;
+  fieldId: string;
+  expectedType: string;
+  actualType: string;
+  config?: Record<string, any>;
+}
+
+export interface DimensSheetHealthField {
+  key: string;
+  label: string;
+  expectedType: string;
+  actualType?: string;
+  fieldId?: string;
+  status: 'ok' | 'missing' | 'type_mismatch' | 'config_mismatch';
+  message?: string;
+}
+
+export interface DimensSheetHealthReport {
+  sheetId: string;
+  sheetName?: string;
+  sheetType: SheetType;
+  status: DimensSheetHealthStatus;
+  fields: DimensSheetHealthField[];
+  views: {
+    hasPublicGridView: boolean;
+    defaultViewId?: string;
+  };
+  missingKeys: string[];
+  actions: Array<'create_fields' | 'repair_select_config' | 'create_default_view' | 'manual_migration'>;
+  warnings: string[];
 }
 
 export interface DimensView {
@@ -355,6 +394,35 @@ export async function getTeamIds(): Promise<string[]> {
   return auth?.teamIds || [];
 }
 
+export function getDimensLoadErrorMessage(error: unknown, target: 'project' | 'sheet'): string {
+  const anyError = error as { code?: string; message?: string } | undefined;
+  const message = anyError?.message || String(error || '');
+
+  if (anyError?.code === DIMENS_AUTH_REQUIRED || message.includes('请先登录') || message.includes('未登录')) {
+    return '维表登录已失效，请重新登录后再加载资源';
+  }
+
+  if (message.includes('401')) {
+    return '维表授权已失效，请重新登录后再加载资源';
+  }
+
+  if (message.includes('403') || message.includes('无权限') || message.includes('权限') || message.includes('不是该团队成员')) {
+    return target === 'project'
+      ? '当前账号没有该团队的项目权限，请切换团队或联系管理员授权'
+      : '当前账号没有该项目下表格权限，请确认项目成员和表权限';
+  }
+
+  if (message.includes('404') || message.includes('不存在') || message.includes('已被删除') || message.includes('已被移除')) {
+    return target === 'project'
+      ? '项目不存在或已被移除，请重新选择团队后加载'
+      : '表不存在或已被移除，请重新选择项目或目标表';
+  }
+
+  return target === 'project'
+    ? '项目列表加载失败，请检查网络、团队权限或稍后重试'
+    : '表列表加载失败，请检查项目权限、网络或稍后重试';
+}
+
 export function getSheetConfig(sheetType: SheetType): SheetConfig {
   return SHEET_CONFIGS[sheetType];
 }
@@ -586,6 +654,121 @@ function buildFieldMapping(columns: DimensColumn[], sheetType: SheetType): Recor
   return fieldMapping;
 }
 
+function buildFieldBindings(columns: DimensColumn[], sheetType: SheetType): Record<string, DimensFieldBinding> {
+  const bindings: Record<string, DimensFieldBinding> = {};
+  for (const colConfig of SHEET_CONFIGS[sheetType].columns) {
+    const existing = columns.find((c) => c.label === colConfig.label);
+    if (existing) {
+      bindings[colConfig.key] = {
+        key: colConfig.key,
+        label: colConfig.label,
+        fieldId: existing.fieldId,
+        expectedType: colConfig.type,
+        actualType: existing.type || 'text',
+        config: existing.config,
+      };
+    }
+  }
+  return bindings;
+}
+
+function buildSheetHealthReport(
+  sheetType: SheetType,
+  sheetId: string,
+  sheetName: string | undefined,
+  columns: DimensColumn[],
+  views: DimensView[]
+): DimensSheetHealthReport {
+  const sheetConfig = SHEET_CONFIGS[sheetType];
+  const fields: DimensSheetHealthField[] = sheetConfig.columns.map((colConfig) => {
+    const existing = columns.find((c) => c.label === colConfig.label);
+    if (!existing) {
+      return {
+        key: colConfig.key,
+        label: colConfig.label,
+        expectedType: colConfig.type,
+        status: 'missing',
+        message: '字段缺失',
+      };
+    }
+
+    if (existing.type !== colConfig.type) {
+      return {
+        key: colConfig.key,
+        label: colConfig.label,
+        expectedType: colConfig.type,
+        actualType: existing.type,
+        fieldId: existing.fieldId,
+        status: 'type_mismatch',
+        message: `字段类型应为 ${colConfig.type}，当前为 ${existing.type}`,
+      };
+    }
+
+    if (needsColumnConfigRepair(existing, colConfig)) {
+      return {
+        key: colConfig.key,
+        label: colConfig.label,
+        expectedType: colConfig.type,
+        actualType: existing.type,
+        fieldId: existing.fieldId,
+        status: 'config_mismatch',
+        message: '字段配置不完整',
+      };
+    }
+
+    return {
+      key: colConfig.key,
+      label: colConfig.label,
+      expectedType: colConfig.type,
+      actualType: existing.type,
+      fieldId: existing.fieldId,
+      status: 'ok',
+    };
+  });
+
+  const publicGridView = views.find((view) => view.type === 'grid' && view.isPublic);
+  const missingKeys = sheetConfig.primaryKeys.filter((key) => {
+    const field = fields.find((item) => item.key === key);
+    return !field?.fieldId || field.status === 'missing';
+  });
+  const warnings = fields
+    .filter((field) => field.message)
+    .map((field) => `${field.label}: ${field.message}`);
+  if (!publicGridView) {
+    warnings.push('缺少公开 grid 默认视图');
+  }
+
+  const actions = new Set<DimensSheetHealthReport['actions'][number]>();
+  if (fields.some((field) => field.status === 'missing')) actions.add('create_fields');
+  if (fields.some((field) => field.status === 'config_mismatch')) actions.add('repair_select_config');
+  if (!publicGridView) actions.add('create_default_view');
+  if (fields.some((field) => field.status === 'type_mismatch')) actions.add('manual_migration');
+
+  let status: DimensSheetHealthStatus = 'ok';
+  if (missingKeys.length > 0) {
+    status = 'blocked';
+  } else if (fields.some((field) => field.status === 'type_mismatch')) {
+    status = 'risk';
+  } else if (actions.size > 0) {
+    status = 'repairable';
+  }
+
+  return {
+    sheetId,
+    sheetName,
+    sheetType,
+    status,
+    fields,
+    views: {
+      hasPublicGridView: Boolean(publicGridView),
+      defaultViewId: publicGridView?.viewId || publicGridView?.id,
+    },
+    missingKeys,
+    actions: Array.from(actions),
+    warnings,
+  };
+}
+
 function formatColumnEnsureError(prefix: string, missing: string[], errors: string[]): string {
   const parts = [`${prefix}：${missing.join('、')}`];
   if (errors.length > 0) {
@@ -599,7 +782,7 @@ export async function ensureColumns(
   projectId: string,
   sheetId: string,
   sheetType: SheetType
-): Promise<{ fieldMapping: Record<string, string>; missing: string[]; created: string[]; errors: string[] }> {
+): Promise<{ fieldMapping: Record<string, string>; fieldBindings: Record<string, DimensFieldBinding>; missing: string[]; created: string[]; errors: string[] }> {
   let columns = await listColumns(teamId, projectId, sheetId);
   const created: string[] = [];
   const errors: string[] = [];
@@ -645,11 +828,56 @@ export async function ensureColumns(
   }
 
   const fieldMapping = buildFieldMapping(columns, sheetType);
+  const fieldBindings = buildFieldBindings(columns, sheetType);
   const missing = SHEET_CONFIGS[sheetType].columns
     .filter((col) => !fieldMapping[col.key])
     .map((col) => col.label);
 
-  return { fieldMapping, missing, created, errors };
+  return { fieldMapping, fieldBindings, missing, created, errors };
+}
+
+export async function inspectSheetHealth(
+  teamId: string,
+  projectId: string,
+  sheetId: string,
+  sheetType: SheetType,
+  sheetName?: string
+): Promise<DimensSheetHealthReport> {
+  const [columns, views] = await Promise.all([
+    listColumns(teamId, projectId, sheetId),
+    listViews(teamId, projectId, sheetId).catch(() => []),
+  ]);
+  return buildSheetHealthReport(sheetType, sheetId, sheetName, columns, views);
+}
+
+export async function repairSheetStructure(
+  teamId: string,
+  projectId: string,
+  sheetId: string,
+  sheetType: SheetType,
+  sheetName?: string
+): Promise<{
+  fieldMapping: Record<string, string>;
+  fieldBindings: Record<string, DimensFieldBinding>;
+  missing: string[];
+  created: string[];
+  errors: string[];
+  health: DimensSheetHealthReport;
+}> {
+  const ensured = await ensureColumns(teamId, projectId, sheetId, sheetType);
+  const errors = [...ensured.errors];
+  try {
+    await ensureDefaultView(teamId, projectId, sheetId);
+  } catch (e: any) {
+    errors.push(`创建默认视图失败：${e.message || String(e)}`);
+  }
+
+  const health = await inspectSheetHealth(teamId, projectId, sheetId, sheetType, sheetName);
+  return {
+    ...ensured,
+    errors,
+    health,
+  };
 }
 
 export async function saveSheetTarget(sheetType: SheetType, sheet: DimensSheet): Promise<DimensSheetTarget> {
@@ -658,6 +886,8 @@ export async function saveSheetTarget(sheetType: SheetType, sheet: DimensSheet):
   const latestConfig = await getConfig();
   const columns = await listColumns(latestConfig.teamId, projectId, sheet.sheetId);
   const fieldMapping = buildFieldMapping(columns, sheetType);
+  const fieldBindings = buildFieldBindings(columns, sheetType);
+  const health = await inspectSheetHealth(latestConfig.teamId, projectId, sheet.sheetId, sheetType, sheet.name);
   const target: DimensSheetTarget = {
     sheetId: sheet.sheetId,
     sheetName: sheet.name,
@@ -665,6 +895,9 @@ export async function saveSheetTarget(sheetType: SheetType, sheet: DimensSheet):
     projectId,
     projectName: latestConfig.projectName || DEFAULT_PROJECT_NAME,
     fieldMapping,
+    fieldBindings,
+    healthStatus: health.status,
+    healthWarnings: health.warnings,
     upsertKeys: SHEET_CONFIGS[sheetType].primaryKeys,
     checkedAt: Date.now(),
   };
@@ -697,8 +930,7 @@ export async function createStandardSheetForType(sheetType: SheetType, sheetName
   const sheetConfig = SHEET_CONFIGS[sheetType];
   const name = sheetName?.trim() || sheetConfig.name;
   const sheetId = await createSheet(projectId, name);
-  const ensured = await ensureColumns(config.teamId, projectId, sheetId, sheetType);
-  await ensureDefaultView(config.teamId, projectId, sheetId);
+  const ensured = await repairSheetStructure(config.teamId, projectId, sheetId, sheetType, name);
   if (ensured.missing.length > 0) {
     throw new Error(formatColumnEnsureError('标准表已创建，但以下字段未能补齐', ensured.missing, ensured.errors));
   }
@@ -710,6 +942,9 @@ export async function createStandardSheetForType(sheetType: SheetType, sheetName
     projectId,
     projectName: config.projectName || DEFAULT_PROJECT_NAME,
     fieldMapping: ensured.fieldMapping,
+    fieldBindings: ensured.fieldBindings,
+    healthStatus: ensured.health.status,
+    healthWarnings: ensured.health.warnings,
     upsertKeys: sheetConfig.primaryKeys,
     checkedAt: Date.now(),
   };
@@ -744,8 +979,7 @@ export async function ensureSheetTarget(sheetType: SheetType): Promise<DimensShe
   const sheetId = sheet?.sheetId || await createSheet(projectId, sheetConfig.name);
   const sheetName = sheet?.name || sheetConfig.name;
 
-  const ensured = await ensureColumns(config.teamId, projectId, sheetId, sheetType);
-  await ensureDefaultView(config.teamId, projectId, sheetId);
+  const ensured = await repairSheetStructure(config.teamId, projectId, sheetId, sheetType, sheetName);
   if (ensured.missing.length > 0) {
     throw new Error(formatColumnEnsureError('目标表缺少字段', ensured.missing, ensured.errors));
   }
@@ -757,6 +991,9 @@ export async function ensureSheetTarget(sheetType: SheetType): Promise<DimensShe
     projectId,
     projectName: config.projectName || DEFAULT_PROJECT_NAME,
     fieldMapping: ensured.fieldMapping,
+    fieldBindings: ensured.fieldBindings,
+    healthStatus: ensured.health.status,
+    healthWarnings: ensured.health.warnings,
     upsertKeys: sheetConfig.primaryKeys,
     checkedAt: Date.now(),
   };
@@ -846,17 +1083,107 @@ function isEmptyDimensValue(value: any): boolean {
   return false;
 }
 
+function normalizeBooleanValue(value: any): boolean | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  const normalized = normalizeString(value).toLowerCase();
+  if (['true', '1', 'yes', 'y', '是', '已认证'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n', '否', '未认证'].includes(normalized)) return false;
+  return Boolean(value);
+}
+
+function normalizeNumberValue(value: any): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  const parsed = Number(String(value).replace(/,/g, '').trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeDateValue(value: any): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  if (typeof value === 'number') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  const raw = normalizeString(value);
+  if (!raw) return undefined;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? raw : date.toISOString();
+}
+
+function normalizeUrlValue(value: any): string | undefined {
+  const raw = normalizeString(value);
+  if (!raw) return undefined;
+  return /^https?:\/\//i.test(raw) ? raw : raw;
+}
+
+function getActualFieldType(binding: DimensFieldBinding | undefined, fallbackType?: string): string {
+  return binding?.actualType || fallbackType || 'text';
+}
+
+function formatCellValueForWrite(
+  sheetType: SheetType,
+  key: string,
+  value: any,
+  binding: DimensFieldBinding | undefined,
+  mode: 'create' | 'update'
+): any {
+  const expectedColumn = getColumnConfigByKey(sheetType, key);
+  const actualType = getActualFieldType(binding, expectedColumn?.type);
+  let formatted = value;
+
+  if (expectedColumn?.options?.length) {
+    formatted = actualType === 'select' || actualType === 'multiSelect'
+      ? formatOptionId(value, expectedColumn.options)
+      : formatOptionLabel(value, expectedColumn.options);
+  }
+
+  if (actualType === 'checkbox') {
+    const booleanValue = normalizeBooleanValue(formatted);
+    return mode === 'create' ? booleanValue ?? false : booleanValue;
+  }
+
+  if (actualType === 'number') {
+    const numberValue = normalizeNumberValue(formatted);
+    return mode === 'create' ? numberValue ?? '' : numberValue;
+  }
+
+  if (actualType === 'date' || actualType === 'datetime') {
+    const dateValue = normalizeDateValue(formatted);
+    return mode === 'create' ? dateValue ?? '' : dateValue;
+  }
+
+  if (actualType === 'url') {
+    const urlValue = normalizeUrlValue(formatted);
+    return mode === 'create' ? urlValue ?? '' : urlValue;
+  }
+
+  if (Array.isArray(formatted)) {
+    if (actualType === 'multiSelect') return formatted;
+    return formatted.join(', ');
+  }
+
+  if (formatted === undefined || formatted === null) {
+    return mode === 'create' ? '' : undefined;
+  }
+
+  if (formatted === '') {
+    return mode === 'create' ? '' : undefined;
+  }
+
+  return formatted;
+}
+
 function normalizeValueForCreate(value: any): any {
   if (value === undefined || value === null) return '';
   if (Array.isArray(value)) return value.join(', ');
-  if (typeof value === 'boolean') return value ? '是' : '否';
   return value;
 }
 
 function normalizeValueForUpdate(value: any): any {
   if (value === undefined || value === null || value === '') return undefined;
   if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : undefined;
-  if (typeof value === 'boolean') return value ? '是' : '否';
   return value;
 }
 
@@ -864,14 +1191,12 @@ function mapRowData(
   sheetType: SheetType,
   item: Record<string, any>,
   fieldMapping: Record<string, string>,
+  fieldBindings: Record<string, DimensFieldBinding>,
   mode: 'create' | 'update'
 ): Record<string, any> {
   const rowData: Record<string, any> = {};
   for (const [key, fieldId] of Object.entries(fieldMapping)) {
-    const formattedValue = formatFieldValueForDimens(sheetType, key, item[key]);
-    const value = mode === 'create'
-      ? normalizeValueForCreate(formattedValue)
-      : normalizeValueForUpdate(formattedValue);
+    const value = formatCellValueForWrite(sheetType, key, item[key], fieldBindings[key], mode);
     if (value !== undefined) {
       rowData[fieldId] = value;
     }
@@ -1124,7 +1449,11 @@ export async function importRows(
   const config = await getConfig();
   const projectId = config.projectId || await ensureProject();
   const latestConfig = await getConfig();
-  const missingKeys = SHEET_CONFIGS[sheetType].primaryKeys.filter((key) => !fieldMapping[key]);
+  const latestColumns = await listColumns(latestConfig.teamId, projectId, sheetId);
+  const refreshedFieldMapping = buildFieldMapping(latestColumns, sheetType);
+  const activeFieldMapping = Object.keys(refreshedFieldMapping).length > 0 ? refreshedFieldMapping : fieldMapping;
+  const fieldBindings = buildFieldBindings(latestColumns, sheetType);
+  const missingKeys = SHEET_CONFIGS[sheetType].primaryKeys.filter((key) => !activeFieldMapping[key]);
   if (missingKeys.length > 0) {
     throw new Error(`目标表缺少 Upsert 主键字段映射：${missingKeys.join('、')}`);
   }
@@ -1163,18 +1492,18 @@ export async function importRows(
     try {
       const existing = rowCache.has(businessKey)
         ? rowCache.get(businessKey) || null
-        : await findExistingRowByKey(latestConfig.teamId, projectId, sheetId, sheetType, fieldMapping, item);
+        : await findExistingRowByKey(latestConfig.teamId, projectId, sheetId, sheetType, activeFieldMapping, item);
       let matchedRow = existing;
       if (!matchedRow) {
         if (!remoteRowIndex) {
-          remoteRowIndex = await buildRemoteRowIndex(latestConfig.teamId, projectId, sheetId, sheetType, fieldMapping);
+          remoteRowIndex = await buildRemoteRowIndex(latestConfig.teamId, projectId, sheetId, sheetType, activeFieldMapping);
         }
         matchedRow = remoteRowIndex.get(businessKey) || null;
       }
       rowCache.set(businessKey, matchedRow);
 
       if (matchedRow) {
-        const updates = mapRowData(sheetType, item, fieldMapping, 'update');
+        const updates = mapRowData(sheetType, item, activeFieldMapping, fieldBindings, 'update');
         if (Object.keys(updates).length === 0) {
           skipped += 1;
         } else {
@@ -1182,7 +1511,7 @@ export async function importRows(
           updated += 1;
         }
       } else {
-        await createRow(sheetId, mapRowData(sheetType, item, fieldMapping, 'create'));
+        await createRow(sheetId, mapRowData(sheetType, item, activeFieldMapping, fieldBindings, 'create'));
         created += 1;
         remoteRowIndex?.set(businessKey, { rowId: '', data: {}, version: undefined });
       }
@@ -1249,11 +1578,9 @@ export async function getSheetViewUrl(sheetId: string, target?: Partial<DimensSh
   const projectId = target?.projectId || config.projectId || await ensureProject();
   const latestConfig = await getConfig();
   const teamId = target?.teamId || latestConfig.teamId;
-  if (!target?.projectId || !target?.teamId) {
-    const sheets = await listSheets(projectId);
-    if (!sheets.some((sheet) => sheet.sheetId === sheetId)) {
-      throw new Error('目标表不属于当前项目，请重新选择目标表后再打开');
-    }
+  const sheets = await listSheets(projectId);
+  if (!sheets.some((sheet) => sheet.sheetId === sheetId)) {
+    throw new Error('目标表不属于当前项目，可能已被删除或移动，请重新选择目标表后再打开');
   }
   return `https://dimens.bintelai.com/#/${teamId}/${projectId}/${sheetId}`;
 }

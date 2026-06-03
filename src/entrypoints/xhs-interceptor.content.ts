@@ -7,20 +7,12 @@ export default defineContentScript({
   main() {
     console.log('[智联AI] 小红书 MAIN world 拦截器已启动');
 
-    const dataApis = [
-      '/api/sns/web/v1/homefeed',
-      '/api/sns/web/v1/search/notes',
-      '/api/sns/web/v1/user_posted',
-      '/api/sns/web/v2/note/',
-      '/api/sns/web/v1/note/',
-      '/api/sns/web/v2/user/',
-      '/api/sns/web/v1/user/',
-      '/api/sns/web/v2/comment/page',
-      '/api/sns/web/v1/feed'
+    const dataApiPrefixes = [
+      '/api/sns/web/'
     ];
 
     function isDataApiUrl(url: string): boolean {
-      return dataApis.some(api => url.includes(api));
+      return dataApiPrefixes.some(api => url.includes(api));
     }
 
     function dispatchInterceptedData(url: string, data: any) {

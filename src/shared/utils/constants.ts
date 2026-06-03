@@ -59,13 +59,13 @@ export const PLATFORM_FEATURES: Record<Platform, PlatformFeature> = {
     label: '小红书',
     status: 'enabled',
     url: 'https://www.xiaohongshu.com',
-    batchCollectPageTypes: ['author_profile']
+    batchCollectPageTypes: ['author_profile', 'post_detail']
   },
   douyin: {
     label: '抖音',
     status: 'enabled',
     url: 'https://www.douyin.com',
-    batchCollectPageTypes: []
+    batchCollectPageTypes: ['author_profile', 'post_detail']
   },
   kuaishou: {
     label: '快手',
