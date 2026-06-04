@@ -32,7 +32,7 @@ const platforms: Array<{
   note: string;
 }> = [
   { id: 'xhs', name: PLATFORM_FEATURES.xhs.label, icon: BookOpen, markClass: 'bg-rose-50 text-rose-600 ring-rose-100', note: '作者主页采集' },
-  { id: 'douyin', name: PLATFORM_FEATURES.douyin.label, icon: Music2, markClass: 'bg-slate-100 text-slate-900 ring-slate-200', note: '功能验收中' },
+  { id: 'douyin', name: PLATFORM_FEATURES.douyin.label, icon: Music2, markClass: 'bg-slate-100 text-slate-900 ring-slate-200', note: '作者/作品采集' },
   { id: 'pgy', name: PLATFORM_FEATURES.pgy.label, icon: Store, markClass: 'bg-amber-50 text-amber-700 ring-amber-100', note: '暂未支持' },
   { id: 'xingtu', name: PLATFORM_FEATURES.xingtu.label, icon: BarChart3, markClass: 'bg-sky-50 text-sky-700 ring-sky-100', note: '暂未支持' },
 ];
