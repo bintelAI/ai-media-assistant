@@ -12,6 +12,26 @@ export interface CommentQueryOptions {
   orderDirection?: 'asc' | 'desc';
 }
 
+function isMeaningfulCommentValue(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function mergeCommentEntity(
+  existing: CommentEntity,
+  incoming: Omit<CommentEntity, 'id' | 'collectedAt' | 'updatedAt'>,
+  updatedAt: string
+): CommentEntity {
+  const merged: CommentEntity = { ...existing, updatedAt };
+  for (const [key, value] of Object.entries(incoming) as [keyof typeof incoming, any][]) {
+    if (isMeaningfulCommentValue(value)) {
+      (merged as any)[key] = value;
+    }
+  }
+  return merged;
+}
+
 export async function addComment(comment: Omit<CommentEntity, 'id' | 'collectedAt' | 'updatedAt'>): Promise<string> {
   const db = await getDB();
   
@@ -20,11 +40,7 @@ export async function addComment(comment: Omit<CommentEntity, 'id' | 'collectedA
   const now = new Date().toISOString();
   
   if (existing) {
-    const updated: CommentEntity = {
-      ...existing,
-      ...comment,
-      updatedAt: now
-    };
+    const updated = mergeCommentEntity(existing, comment, now);
     await db.put('comments', updated);
     return existing.id;
   }

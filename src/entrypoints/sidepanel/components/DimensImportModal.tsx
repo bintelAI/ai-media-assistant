@@ -47,7 +47,7 @@ export default function DimensImportModal() {
   const sheetConfig = useMemo(() => getSheetConfig(sheetType), [sheetType]);
   const targetLabel = dimensImportTarget === 'posts' ? '帖子' : dimensImportTarget === 'authors' ? '作者' : '评论';
 
-  const [scope, setScope] = useState<'all' | 'filtered' | 'selected'>('selected');
+  const [scope, setScope] = useState<'all' | 'filtered' | 'selected'>('all');
   const [step, setStep] = useState<'checking' | 'credentials' | 'import'>('checking');
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ total: 0, completed: 0, success: 0, created: 0, updated: 0, skipped: 0, failed: 0, deduped: 0, dirtySkipped: 0 });
@@ -340,16 +340,37 @@ export default function DimensImportModal() {
   };
 
   const getData = async () => {
+    let data: any[] = [];
     switch (dimensImportTarget) {
       case 'posts':
-        return getPostsData(scope);
+        data = await getPostsData(scope);
+        break;
       case 'authors':
-        return getAuthorsData(scope);
+        data = await getAuthorsData(scope);
+        break;
       case 'comments':
-        return getCommentsData(scope);
+        data = await getCommentsData(scope);
+        break;
       default:
         return [];
     }
+
+    if (scope === 'selected' && data.length === 0) {
+      showToast('未选中数据，已自动改为导入全部数据', 'info');
+      setScope('all');
+      switch (dimensImportTarget) {
+        case 'posts':
+          return getPostsData('all');
+        case 'authors':
+          return getAuthorsData('all');
+        case 'comments':
+          return getCommentsData('all');
+        default:
+          return [];
+      }
+    }
+
+    return data;
   };
 
   const handleImport = async () => {

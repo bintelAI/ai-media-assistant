@@ -10,7 +10,9 @@ let activePostWatcherTimer: ReturnType<typeof setInterval> | null = null;
 
 const PAGE_UI_CLASS = 'zl-page-collect-ui';
 const PAGE_UI_SELECTOR = `.${PAGE_UI_CLASS}`;
+const DOUYIN_ACTION_STYLE_ID = 'zl-douyin-action-style';
 const DOUYIN_VIDEO_CONTROLS_SELECTOR = 'xg-controls:not(.control_autohide) xg-right-grid';
+const DOUYIN_VIDEO_LEFT_GRID_SELECTOR = '.xg-left-grid';
 
 const collectedPosts: Map<string, Partial<PostEntity>> = new Map();
 const collectedAuthors: Map<string, Partial<AuthorEntity>> = new Map();
@@ -65,19 +67,27 @@ function getDouyinPostIdFromElement(element?: Element | null): string | null {
   return link?.href ? getDouyinPostIdFromUrl(link.href) : null;
 }
 
-function getDouyinActiveDomPostId(): string | null {
-  const activeVideo = document.querySelector<HTMLElement>('div[data-e2e="feed-active-video"]');
-  const activeVideoId = activeVideo?.getAttribute('data-e2e-vid');
-  if (activeVideoId) return activeVideoId;
+function isVisibleDouyinElement(element?: Element | null): boolean {
+  if (!(element instanceof HTMLElement)) return false;
 
-  const activeControl = document.querySelector(`${DOUYIN_VIDEO_CONTROLS_SELECTOR}`);
-  const controlPostId = getDouyinPostIdFromElement(activeControl);
-  if (controlPostId) return controlPostId;
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  if (rect.bottom <= 0 || rect.top >= window.innerHeight) return false;
+  if (rect.right <= 0 || rect.left >= window.innerWidth) return false;
 
-  const visibleVideo = Array.from(document.querySelectorAll<HTMLElement>('div[data-e2e-vid]'))
+  const style = window.getComputedStyle(element);
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+}
+
+function getVisibleDouyinPostRoot(postId?: string | null): HTMLElement | null {
+  const candidates = postId
+    ? Array.from(document.querySelectorAll<HTMLElement>(`div[data-e2e-vid="${escapeAttributeValue(postId)}"]`))
+    : Array.from(document.querySelectorAll<HTMLElement>('div[data-e2e-vid]'));
+
+  return candidates
     .filter((el) => {
       const rect = el.getBoundingClientRect();
-      return rect.width > 240 && rect.height > 180 && rect.bottom > 0 && rect.top < window.innerHeight;
+      return isVisibleDouyinElement(el) && rect.width > 240 && rect.height > 180;
     })
     .sort((a, b) => {
       const aRect = a.getBoundingClientRect();
@@ -85,7 +95,21 @@ function getDouyinActiveDomPostId(): string | null {
       const aArea = Math.max(0, Math.min(aRect.bottom, window.innerHeight) - Math.max(aRect.top, 0)) * aRect.width;
       const bArea = Math.max(0, Math.min(bRect.bottom, window.innerHeight) - Math.max(bRect.top, 0)) * bRect.width;
       return bArea - aArea;
-    })[0];
+    })[0] || null;
+}
+
+function getDouyinActiveDomPostId(): string | null {
+  const modalPostId = getDouyinModalPostId();
+  const modalVideo = modalPostId ? getVisibleDouyinPostRoot(modalPostId) : null;
+  const modalVideoId = modalVideo?.getAttribute('data-e2e-vid');
+  if (modalVideoId) return modalVideoId;
+
+  const activeVideo = Array.from(document.querySelectorAll<HTMLElement>('div[data-e2e="feed-active-video"]'))
+    .find(isVisibleDouyinElement);
+  const activeVideoId = activeVideo?.getAttribute('data-e2e-vid');
+  if (activeVideoId) return activeVideoId;
+
+  const visibleVideo = getVisibleDouyinPostRoot();
 
   return visibleVideo?.getAttribute('data-e2e-vid') || null;
 }
@@ -103,21 +127,51 @@ function getDouyinActivePostId(): string | null {
 }
 
 function findDouyinPostActionAnchor(postId = getDouyinActivePostId()): Element | null {
-  if (postId) {
-    const safePostId = escapeAttributeValue(postId);
-    const inCurrentVideo = document.querySelector(`div[data-e2e-vid="${safePostId}"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}`);
+  const detailAnchor = findDouyinDetailActionAnchor();
+  if (detailAnchor) return detailAnchor;
+
+  return findDouyinRecommendActionAnchor(postId);
+}
+
+function findDouyinDetailActionAnchor(): Element | null {
+  const match = window.location.pathname.match(/^\/(video|note)\/\d+$/);
+  if (!match) return null;
+
+  const detailRoot = document.querySelector(`[data-e2e="${match[1]}-detail"]`);
+  if (!detailRoot) return null;
+
+  return detailRoot.querySelector('div[data-e2e="detail-video-info"]') ||
+    detailRoot.querySelector(DOUYIN_VIDEO_CONTROLS_SELECTOR) ||
+    detailRoot.querySelector(DOUYIN_VIDEO_LEFT_GRID_SELECTOR);
+}
+
+function findDouyinRecommendActionAnchor(postId = getDouyinActivePostId()): Element | null {
+  const scopedPostId = getDouyinModalPostId() || postId;
+  if (scopedPostId) {
+    const safePostId = escapeAttributeValue(scopedPostId);
+    const postRoot = getVisibleDouyinPostRoot(scopedPostId);
+    const inCurrentVideo = postRoot?.querySelector(DOUYIN_VIDEO_CONTROLS_SELECTOR) ||
+      document.querySelector(`div[data-e2e-vid="${safePostId}"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}`);
     if (inCurrentVideo) return inCurrentVideo;
+
+    const inCurrentVideoLeftGrid = postRoot?.querySelector(DOUYIN_VIDEO_LEFT_GRID_SELECTOR) ||
+      document.querySelector(`div[data-e2e-vid="${safePostId}"] ${DOUYIN_VIDEO_LEFT_GRID_SELECTOR}`);
+    if (inCurrentVideoLeftGrid) return inCurrentVideoLeftGrid;
   }
 
-  const activeControls = document.querySelector(`div[data-e2e="feed-active-video"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}`);
+  const activeVideo = Array.from(document.querySelectorAll<HTMLElement>('div[data-e2e="feed-active-video"]'))
+    .find(isVisibleDouyinElement);
+  const activeControls = activeVideo?.querySelector(DOUYIN_VIDEO_CONTROLS_SELECTOR);
   if (activeControls) return activeControls;
 
-  const detailControls = document.querySelector(
-    `div[data-e2e="video-detail"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}, div[data-e2e="note-detail"] ${DOUYIN_VIDEO_CONTROLS_SELECTOR}`
-  );
-  if (detailControls) return detailControls;
+  const activeLeftGrid = activeVideo?.querySelector(DOUYIN_VIDEO_LEFT_GRID_SELECTOR);
+  if (activeLeftGrid) return activeLeftGrid;
 
   return null;
+}
+
+function isPostUIMountedAtAnchor(ui: Element, anchor: Element): boolean {
+  return ui.nextElementSibling === anchor || anchor.contains(ui);
 }
 
 function findDouyinAwemeInfoInReactProps(root: Element | null): any {
@@ -865,13 +919,13 @@ function startActivePostWatcher() {
   if (activePostWatcherTimer) return;
 
   activePostWatcherTimer = setInterval(() => {
-    if (!['post_detail', 'feed_list', 'search_result'].includes(currentPageType)) return;
+    if (!['post_detail', 'feed_list'].includes(currentPageType)) return;
 
     const activePostId = getDouyinActivePostId();
     const actionAnchor = findDouyinPostActionAnchor(activePostId);
     const currentPostUI = document.querySelector(getPageUISelector('post_detail'));
 
-    if (actionAnchor && currentPostUI && !actionAnchor.contains(currentPostUI)) {
+    if (actionAnchor && currentPostUI && !isPostUIMountedAtAnchor(currentPostUI, actionAnchor)) {
       currentVisiblePostId = activePostId || currentVisiblePostId;
       if (activePostId) cacheDouyinPostFromDOM(activePostId);
       removeInjectedUI();
@@ -903,12 +957,14 @@ function scheduleEnsureUI() {
 }
 
 function shouldEnsurePageUI(): boolean {
-  if (!['post_detail', 'author_profile', 'feed_list', 'search_result'].includes(currentPageType)) {
+  if (!['post_detail', 'author_profile', 'feed_list'].includes(currentPageType)) {
     return false;
   }
 
-  if (currentPageType === 'feed_list' || currentPageType === 'search_result') {
-    return !document.querySelector(getPageUISelector('post_detail')) || hasDouyinListCards();
+  if (currentPageType === 'feed_list') {
+    const actionAnchor = findDouyinPostActionAnchor();
+    const existingUI = document.querySelector(getPageUISelector('post_detail'));
+    return !!actionAnchor && (!existingUI || !isPostUIMountedAtAnchor(existingUI, actionAnchor));
   }
 
   if (currentPageType !== 'post_detail' && currentPageType !== 'author_profile') {
@@ -937,17 +993,9 @@ function injectUIByPageType(pageType: PageType) {
       injectAuthorPageUI();
       break;
     case 'feed_list':
-    case 'search_result':
-      injectCurrentPostFloatingUI();
-      injectListPageUI();
+      injectRecommendPostActionUI();
       break;
   }
-}
-
-function hasDouyinListCards(): boolean {
-  return document.querySelectorAll(
-    '[data-e2e="recommend-list-item"], [data-e2e="feed-active-video"], [data-e2e-vid], .video-card, .aweme-card, .xg_player, [class*="video-feed"] > div'
-  ).length > 0;
 }
 
 function injectPostPageUI() {
@@ -958,7 +1006,7 @@ function injectPostPageUI() {
   const existingUI = document.querySelector(getPageUISelector('post_detail'));
 
   if (existingUI) {
-    if (actionAnchor && !actionAnchor.contains(existingUI)) {
+    if (actionAnchor && !isPostUIMountedAtAnchor(existingUI, actionAnchor)) {
       removeInjectedUI();
       injectPostActionUI(actionAnchor, activePostId);
     }
@@ -970,70 +1018,17 @@ function injectPostPageUI() {
     return;
   }
 
-  const selectors = [
-    '[data-e2e="video-desc"]',
-    '[data-e2e="detail-desc"]',
-    '[data-e2e="note-desc"]',
-    '.video-info-detail',
-    '.note-info-detail',
-    '#videoDesc',
-    '.choose-video-container',
-    '.desc-container',
-    '[class*="VideoInfo"]',
-    '[class*="NoteInfo"]',
-    '[class*="Detail"] [class*="desc"]'
-  ];
-
-  let container: Element | null = null;
-  for (const sel of selectors) {
-    container = document.querySelector(sel);
-    if (container) break;
-  }
-
-  if (!container) {
-    container = findDouyinDetailContainer();
-  }
-
-  if (!container) {
-    if (activePostId) {
-      injectCurrentPostFallbackUI();
-      return;
-    }
-
-    setTimeout(injectPostPageUI, 500);
-    return;
-  }
-
-  const defaultText = window.location.pathname.includes('/note/') ? '采集图文' : '采集视频';
-  const { container: buttonContainer, button } = createCollectButton(defaultText, async () => {
-    button.textContent = '采集中...';
-    button.disabled = true;
-
-    const result = await collectDouyinPostById(getDouyinActivePostId());
-
-    if (result.success) {
-      showToast('已保存到本地', 'success');
-      button.textContent = '已采集';
-    } else {
-      showToast(result.error || '采集失败', 'error');
-      button.textContent = defaultText;
-      button.disabled = false;
-    }
-  });
-
-  buttonContainer.classList.add(PAGE_UI_CLASS);
-  buttonContainer.dataset.zlPageType = 'post_detail';
-  container.appendChild(buttonContainer);
-  injectedUI = buttonContainer;
+  setTimeout(injectPostPageUI, 500);
 }
 
 function injectPostActionUI(anchor: Element, postId?: string | null) {
-  const defaultText = window.location.pathname.includes('/note/') ? '采集图文' : '采集视频';
+  const actionPostId = getDouyinPostIdForAction(anchor, postId);
+  const defaultText = getDouyinPostCollectText(actionPostId);
   const { container: buttonContainer, button } = createCollectButton(defaultText, async () => {
     button.textContent = '采集中...';
     button.disabled = true;
 
-    const activePostId = getDouyinActivePostId() || postId;
+    const activePostId = getDouyinPostIdForAction(anchor, actionPostId);
     const result = await collectDouyinPostById(activePostId);
 
     if (result.success) {
@@ -1048,38 +1043,48 @@ function injectPostActionUI(anchor: Element, postId?: string | null) {
 
   buttonContainer.classList.add(PAGE_UI_CLASS);
   buttonContainer.dataset.zlPageType = 'post_detail';
-  buttonContainer.style.cssText = 'z-index: 99; display: inline-flex; align-items: center;';
-  anchor.prepend(buttonContainer);
+  buttonContainer.style.cssText = getDouyinActionContainerStyle(anchor);
+
+  if (isDouyinLeftGridAnchor(anchor)) {
+    anchor.appendChild(buttonContainer);
+  } else {
+    anchor.before(buttonContainer);
+  }
+
   injectedUI = buttonContainer;
 }
 
-function findDouyinDetailContainer(): Element | null {
-  const postId = getDouyinPostIdFromUrl();
-  const candidates = Array.from(document.querySelectorAll<HTMLElement>('article, section, main, div'));
+function getDouyinPostIdForAction(anchor: Element, fallback?: string | null): string | null {
+  return getDouyinModalPostId() ||
+    getDouyinPathPostId() ||
+    getDouyinPostIdFromElement(anchor) ||
+    fallback ||
+    getDouyinActiveDomPostId();
+}
 
-  const scored = candidates
-    .map((el) => {
-      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!text || text.length < 20) return null;
+function getDouyinPostCollectText(postId?: string | null): string {
+  if (window.location.pathname.includes('/note/')) return '采集图文';
 
-      let score = 0;
-      if (postId && text.includes(postId)) score += 3;
-      if (text.includes('发布时间')) score += 4;
-      if (text.includes('相关推荐')) score += 2;
-      if (text.includes('评论')) score += 1;
-      if (text.includes('关注')) score += 1;
-      if (text.includes('粉丝')) score += 1;
+  const aweme = getDouyinAwemeInfoFromDOM(postId || undefined);
+  if (Array.isArray(aweme?.images) && aweme.images.length > 0) return '采集图文';
 
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 120 || rect.height < 40) score -= 2;
-      if (rect.width > window.innerWidth * 0.95 && rect.height > window.innerHeight * 0.9) score -= 3;
+  return '采集视频';
+}
 
-      return score > 0 ? { el, score, area: rect.width * rect.height } : null;
-    })
-    .filter((item): item is { el: HTMLElement; score: number; area: number } => item !== null)
-    .sort((a, b) => b.score - a.score || a.area - b.area);
+function getDouyinActionContainerStyle(anchor: Element): string {
+  if (isDouyinLeftGridAnchor(anchor)) {
+    return 'z-index: 99; position: absolute; right: 10px; display: flex; align-items: center;';
+  }
 
-  return scored[0]?.el || null;
+  if (anchor.tagName === 'DIV') {
+    return 'z-index: 99; display: flex; align-items: center; margin-top: 16px;';
+  }
+
+  return 'z-index: 99; display: inline-flex; align-items: center; margin-right: 16px;';
+}
+
+function isDouyinLeftGridAnchor(anchor: Element): boolean {
+  return anchor.matches?.(DOUYIN_VIDEO_LEFT_GRID_SELECTOR) || false;
 }
 
 function injectAuthorPageUI() {
@@ -1186,122 +1191,25 @@ function extractAuthorFromDOM(authorPath?: DouyinAuthorPathInfo | null): Partial
   };
 }
 
-function injectListPageUI() {
-  const selectors = [
-    '[data-e2e="recommend-list-item"]',
-    '[data-e2e-vid]',
-    '.video-card',
-    '.aweme-card',
-    '.xg_player',
-    '[class*="video-feed"] > div'
-  ];
+function injectRecommendPostActionUI() {
+  if (currentPageType !== 'feed_list') return;
 
-  let videoContainer: NodeListOf<Element> | null = null;
-  for (const sel of selectors) {
-    const items = document.querySelectorAll(sel);
-    if (items.length > 0) {
-      videoContainer = items;
-      break;
-    }
-  }
-
-  if (!videoContainer || videoContainer.length === 0) {
+  const actionAnchor = findDouyinPostActionAnchor();
+  if (!actionAnchor) {
+    setTimeout(injectRecommendPostActionUI, 500);
     return;
   }
 
-  videoContainer.forEach((video) => {
-    if (video.querySelector('.zl-collect-btn')) return;
-
-    const button = document.createElement('button');
-    button.className = 'zl-collect-btn';
-    button.innerHTML = '采集';
-    button.style.cssText = `
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      padding: 4px 8px;
-      background: rgba(254, 44, 85, 0.9);
-      color: white;
-      border: none;
-      border-radius: 4px;
-      font-size: 12px;
-      cursor: pointer;
-      opacity: 0;
-      transition: opacity 0.2s;
-      z-index: 10;
-    `;
-
-    (video as HTMLElement).style.position = 'relative';
-    video.appendChild(button);
-
-    video.addEventListener('mouseenter', () => { button.style.opacity = '1'; });
-    video.addEventListener('mouseleave', () => { button.style.opacity = '0'; });
-
-    button.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const postId = getDouyinPostIdFromElement(video);
-      if (!postId) {
-        showToast('无法获取作品ID', 'error');
-        return;
-      }
-
-      button.innerHTML = '采集中...';
-      const result = await collectDouyinPostById(postId);
-      if (result.success) {
-        showToast('已保存到本地', 'success');
-        button.innerHTML = '已采集';
-      } else {
-        showToast(result.error || '采集失败', 'error');
-        button.innerHTML = '采集';
-      }
-    });
-  });
-}
-
-function injectCurrentPostFloatingUI() {
-  if (!['feed_list', 'search_result'].includes(currentPageType)) return;
-  injectCurrentPostFallbackUI();
-}
-
-function injectCurrentPostFallbackUI() {
-  if (document.querySelector(getPageUISelector('post_detail'))) return;
-
-  const activeAnchor = findDouyinPostActionAnchor();
-  if (activeAnchor) {
-    injectPostActionUI(activeAnchor, getDouyinActivePostId());
+  const existingUI = document.querySelector(getPageUISelector('post_detail'));
+  if (existingUI) {
+    if (!isPostUIMountedAtAnchor(existingUI, actionAnchor)) {
+      removeInjectedUI();
+      injectPostActionUI(actionAnchor, getDouyinActivePostId());
+    }
     return;
   }
 
-  const { container, button } = createCollectButton('采集当前作品', async () => {
-    button.textContent = '采集中...';
-    button.disabled = true;
-
-    const postId = getDouyinActivePostId() || currentVisiblePostId;
-    const result = await collectDouyinPostById(postId);
-
-    if (result.success) {
-      showToast('已保存到本地', 'success');
-      button.textContent = '已采集';
-      return;
-    }
-
-    showToast(result.error || '采集失败', 'error');
-    button.textContent = '采集当前作品';
-    button.disabled = false;
-  });
-
-  container.classList.add(PAGE_UI_CLASS);
-  container.dataset.zlPageType = 'post_detail';
-  container.style.cssText = `
-    position: fixed;
-    right: 24px;
-    bottom: 96px;
-    z-index: 2147483647;
-  `;
-  document.documentElement.appendChild(container);
-  injectedUI = container;
+  injectPostActionUI(actionAnchor, getDouyinActivePostId());
 }
 
 function findCurrentDouyinPost(): Partial<PostEntity> | null {
@@ -1391,33 +1299,61 @@ function createCollectButton(
   text: string,
   onClick: () => void
 ): { container: HTMLElement; button: HTMLButtonElement } {
+  ensureDouyinActionStyles();
+
   const container = document.createElement('div');
-  const shadow = container.attachShadow({ mode: 'open' });
+  container.className = 'zl-douyin-action-root';
 
-  shadow.innerHTML = `
-    <style>
-      button {
-        padding: 8px 16px;
-        background: #fe2c55;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        transition: all 0.2s;
-        margin-left: 12px;
-      }
-      button:hover { background: #e0284d; }
-      button:disabled { opacity: 0.6; cursor: not-allowed; }
-    </style>
-    <button>${text}</button>
-  `;
-
-  const button = shadow.querySelector('button') as HTMLButtonElement;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'zl-douyin-action-button';
+  button.textContent = text;
   button.addEventListener('click', onClick);
 
+  container.appendChild(button);
+
   return { container, button };
+}
+
+function ensureDouyinActionStyles() {
+  if (document.getElementById(DOUYIN_ACTION_STYLE_ID)) return;
+
+  const style = document.createElement('style');
+  style.id = DOUYIN_ACTION_STYLE_ID;
+  style.textContent = `
+    .zl-douyin-action-root {
+      pointer-events: auto;
+    }
+
+    .zl-douyin-action-button {
+      height: 32px;
+      min-width: 72px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 10px;
+      border: 0;
+      border-radius: 6px;
+      background: #1677ff;
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 20px;
+      white-space: nowrap;
+      box-shadow: none;
+    }
+
+    .zl-douyin-action-button:hover {
+      background: #0958d9;
+    }
+
+    .zl-douyin-action-button:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+  `;
+  (document.head || document.documentElement).appendChild(style);
 }
 
 function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
@@ -1456,5 +1392,4 @@ function removeInjectedUI() {
     injectedUI = null;
   }
   document.querySelectorAll(PAGE_UI_SELECTOR).forEach(el => el.remove());
-  document.querySelectorAll('.zl-collect-btn').forEach(el => el.remove());
 }

@@ -14,6 +14,26 @@ export interface PostQueryOptions {
   orderDirection?: 'asc' | 'desc';
 }
 
+function isMeaningfulPostValue(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function mergePostEntity(
+  existing: PostEntity,
+  incoming: Omit<PostEntity, 'id' | 'collectedAt' | 'updatedAt'>,
+  updatedAt: string
+): PostEntity {
+  const merged: PostEntity = { ...existing, updatedAt };
+  for (const [key, value] of Object.entries(incoming) as [keyof typeof incoming, any][]) {
+    if (isMeaningfulPostValue(value)) {
+      (merged as any)[key] = value;
+    }
+  }
+  return merged;
+}
+
 export async function addPost(post: Omit<PostEntity, 'id' | 'collectedAt' | 'updatedAt'>): Promise<string> {
   const db = await getDB();
   
@@ -22,11 +42,7 @@ export async function addPost(post: Omit<PostEntity, 'id' | 'collectedAt' | 'upd
   const now = new Date().toISOString();
   
   if (existing) {
-    const updated: PostEntity = {
-      ...existing,
-      ...post,
-      updatedAt: now
-    };
+    const updated = mergePostEntity(existing, post, now);
     await db.put('posts', updated);
     return existing.id;
   }
