@@ -13,6 +13,14 @@ interface XhsApi {
   buildHeaders: (path: string, data?: unknown) => Record<string, string>;
 }
 
+type XhsApiMethod = 'GET' | 'POST';
+
+interface XhsPageApiCallPayload {
+  method: XhsApiMethod;
+  path: string;
+  params?: Record<string, unknown>;
+}
+
 let currentPageType: PageType = 'unknown';
 let injectedUI: HTMLElement | null = null;
 let xhsApi: XhsApi | null = null;
@@ -122,31 +130,6 @@ export default defineContentScript({
     observePageChanges();
   }
 });
-
-/**
- * 处理来自 background 的 API 调用请求
- * 使用劫持的小红书原生请求方法
- */
-async function handleApiCall(path: string, data: Record<string, unknown>): Promise<{ success: boolean; data?: unknown; error?: string }> {
-  try {
-    const xhsRequest = (window as any).__ZL_XHS_REQUEST__;
-
-    if (!xhsRequest) {
-      return { success: false, error: '劫持的请求方法未初始化' };
-    }
-
-    const url = `https://www.xiaohongshu.com${path}`;
-    const response = await xhsRequest('POST', url, data);
-
-    return { success: true, data: response };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'API 调用失败'
-    };
-  }
-}
-
 
 function getXhsPayload(data: any): any | null {
   if (!data) return null;
@@ -300,6 +283,25 @@ function parseLikeCount(value: unknown): number | undefined {
     return Number.isFinite(num) ? num : undefined;
   }
   return undefined;
+}
+
+function parseXhsCountString(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return undefined;
+
+  const cleanValue = value.replace(/[,+\s]/g, '');
+  const num = parseFloat(cleanValue.replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(num)) return undefined;
+
+  if (cleanValue.includes('亿')) return Math.round(num * 100000000);
+  if (cleanValue.includes('万')) return Math.round(num * 10000);
+  if (cleanValue.includes('千')) return Math.round(num * 1000);
+  return Math.round(num);
+}
+
+function getXhsInteractionCount(interactions: any[], type: string): number | undefined {
+  const item = interactions?.find((interaction) => interaction?.type === type);
+  return parseXhsCountString(item?.count);
 }
 
 function toNumber(value: unknown): number | undefined {
@@ -503,15 +505,118 @@ function getCurrentXhsNoteParams(): { noteId: string | null; xsecSource?: string
   };
 }
 
+function unwrapXhsApiPayload<T>(response: any): T | null {
+  if (!response) return null;
+  if (response.success === false) {
+    throw new Error(response.error || '小红书 API 调用失败');
+  }
+
+  let payload = response.data ?? response;
+
+  if (payload?.status !== undefined && payload?.data !== undefined) {
+    payload = payload.data;
+  }
+
+  return payload as T;
+}
+
+function getFirstNoteFromFeedResult(result: any): any | null {
+  if (!result || result.success === false || (typeof result.code === 'number' && result.code !== 0)) {
+    return null;
+  }
+
+  const root = result.data ?? result;
+  const items = root?.items || root?.notes || [];
+  if (Array.isArray(items) && items.length > 0) {
+    return items[0];
+  }
+
+  return root?.note || root?.note_card || root;
+}
+
+async function callXhsPageApi<T>(payload: XhsPageApiCallPayload): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    const requestId = Date.now().toString() + Math.random().toString(36).slice(2, 11);
+    let isResponded = false;
+
+    const cleanup = () => {
+      window.removeEventListener('message', handleResponse);
+      window.removeEventListener('message', handleError);
+      clearTimeout(timeoutId);
+    };
+
+    const finish = (callback: () => void) => {
+      if (isResponded) return;
+      isResponded = true;
+      cleanup();
+      callback();
+    };
+
+    const timeoutId = setTimeout(() => {
+      finish(() => reject(new Error('请求超时，请刷新页面后重试')));
+    }, 30000);
+
+    const handleResponse = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'zl_xhs_api_response' &&
+        event.data?.requestId === requestId &&
+        event.data?.source === 'main'
+      ) {
+        finish(() => {
+          try {
+            resolve(unwrapXhsApiPayload<T>(event.data.response));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    };
+
+    const handleError = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'zl_xhs_api_error' &&
+        event.data?.requestId === requestId &&
+        event.data?.source === 'main'
+      ) {
+        finish(() => reject(new Error(event.data.error || '请求失败')));
+      }
+    };
+
+    window.addEventListener('message', handleResponse);
+    window.addEventListener('message', handleError);
+
+    window.postMessage({
+      type: 'zl_xhs_api_request',
+      requestId,
+      source: 'isolated',
+      method: payload.method,
+      path: payload.path,
+      params: payload.params
+    }, '*');
+  });
+}
+
 async function fetchCurrentXhsPostViaApi(postId: string): Promise<Partial<PostEntity> | null> {
-  const { fetchXhsNoteDetail } = await import('@/shared/services/xhs-user-service');
   const params = getCurrentXhsNoteParams();
-  const postData = await fetchXhsNoteDetail(
-    postId,
-    params.xsecSource,
-    params.xsecToken,
-    window.location.href
-  );
+  const apiParams: Record<string, unknown> = {
+    source_note_id: postId,
+    image_formats: ['jpg', 'webp', 'avif'],
+    extra: { need_body_topic: '1' },
+    xsec_source: params.xsecSource || 'pc_feed'
+  };
+
+  if (params.xsecToken) {
+    apiParams.xsec_token = params.xsecToken;
+  }
+
+  const result = await callXhsPageApi<any>({
+    method: 'POST',
+    path: '/api/sns/web/v1/feed',
+    params: apiParams
+  });
+
+  const note = getFirstNoteFromFeedResult(result);
+  const postData = extractPostData(note);
 
   if (postData?.postId) {
     collectedPosts.set(postData.postId, postData);
@@ -1066,9 +1171,46 @@ async function fetchUserOtherInfoViaApi(userId: string): Promise<Partial<AuthorE
       console.error('[智联AI] API 获取用户信息失败:', e);
     }
   }
-  
-  const { fetchUserOtherInfo } = await import('@/shared/services/xhs-user-service');
-  return fetchUserOtherInfo(userId);
+
+  const currentParams = getCurrentXhsNoteParams();
+  const apiParams: Record<string, unknown> = {
+    target_user_id: userId
+  };
+
+  if (currentParams.xsecSource) {
+    apiParams.xsec_source = currentParams.xsecSource;
+  }
+  if (currentParams.xsecToken) {
+    apiParams.xsec_token = currentParams.xsecToken;
+  }
+
+  const result = await callXhsPageApi<any>({
+    method: 'GET',
+    path: '/api/sns/web/v1/user/otherinfo',
+    params: apiParams
+  });
+
+  const payload = result?.data?.basicInfo ? result.data : result;
+  const basicInfo = payload?.basicInfo || payload?.basic_info;
+  if (!basicInfo) {
+    console.error('[智联AI] 小红书作者 API 返回缺少 basicInfo:', result);
+    return null;
+  }
+
+  const interactions = payload.interactions || payload.interactionList || [];
+  return {
+    platform: 'xhs',
+    authorId: userId,
+    name: basicInfo.nickname || '',
+    avatar: sanitizeUrl(basicInfo.images || basicInfo.image || basicInfo.avatar),
+    profileUrl: `https://www.xiaohongshu.com/user/profile/${userId}`,
+    bio: basicInfo.desc,
+    fansCount: getXhsInteractionCount(interactions, 'fans'),
+    followCount: getXhsInteractionCount(interactions, 'follows'),
+    likedCount: getXhsInteractionCount(interactions, 'interaction'),
+    location: basicInfo.ip_location || basicInfo.ipLocation || basicInfo.location,
+    sourcePageUrl: window.location.href
+  };
 }
 
 function extractAuthorFromDom(authorId: string): Partial<AuthorEntity> | null {

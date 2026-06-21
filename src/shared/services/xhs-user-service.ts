@@ -356,25 +356,26 @@ export async function fetchUserOtherInfo(
     });
 
     console.log(`[智联AI] 获取用户信息成功:`, result);
-    if (!result?.data?.basicInfo) {
-      console.error('[智联AI] 获取用户信息失败:', result?.msg);
+    const payload: any = result?.data?.basicInfo ? result.data : result;
+    const basicInfo = payload?.basicInfo || payload?.basic_info;
+    if (!basicInfo) {
+      console.error('[智联AI] 获取用户信息失败:', result?.msg || result);
       return null;
     }
 
-    const basicInfo = result.data.basicInfo;
-    const interactions = result.data.interactions || [];
+    const interactions = payload.interactions || payload.interactionList || [];
 
     const authorData: Partial<AuthorEntity> = {
       platform: 'xhs',
       authorId: userId,
       name: basicInfo.nickname || '',
-      avatar: cleanUrl(basicInfo.images),
+      avatar: cleanUrl(basicInfo.images || basicInfo.image || basicInfo.avatar),
       profileUrl: `https://www.xiaohongshu.com/user/profile/${userId}`,
       bio: basicInfo.desc,
       fansCount: getInteractionCount(interactions, 'fans'),
       followCount: getInteractionCount(interactions, 'follows'),
       likedCount: getInteractionCount(interactions, 'interaction'),
-      location: basicInfo.ip_location || undefined,
+      location: basicInfo.ip_location || basicInfo.ipLocation || basicInfo.location || undefined,
       sourcePageUrl: `https://www.xiaohongshu.com/user/profile/${userId}`
     };
 

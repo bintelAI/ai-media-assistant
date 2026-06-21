@@ -9,7 +9,6 @@ interface UIState {
   currentDataTab: DataTabType;
   exportModalOpen: boolean;
   exportTarget: ExportTarget | null;
-  dimensImportModalOpen: boolean;
   dimensImportTarget: ExportTarget | null;
   detailDrawerOpen: boolean;
   detailType: 'post' | 'author' | 'comment' | null;
@@ -38,7 +37,6 @@ export const useUIStore = create<UIState>((set) => ({
   currentDataTab: 'posts',
   exportModalOpen: false,
   exportTarget: null,
-  dimensImportModalOpen: false,
   dimensImportTarget: null,
   detailDrawerOpen: false,
   detailType: null,
@@ -65,11 +63,11 @@ export const useUIStore = create<UIState>((set) => ({
   },
 
   openDimensImportModal: (target) => {
-    set({ currentPage: 'dimensImport', dimensImportModalOpen: false, dimensImportTarget: target });
+    set({ currentPage: 'dimensImport', dimensImportTarget: target });
   },
 
   closeDimensImportModal: () => {
-    set({ currentPage: 'data', dimensImportModalOpen: false, dimensImportTarget: null });
+    set({ currentPage: 'data', dimensImportTarget: null });
   },
 
   openDetailDrawer: (type, id) => {

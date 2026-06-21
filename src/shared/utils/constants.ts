@@ -75,9 +75,10 @@ export const PLATFORM_FEATURES: Record<Platform, PlatformFeature> = {
   },
   tiktok: {
     label: 'TikTok',
-    status: 'enabled',
+    status: 'disabled',
     url: 'https://www.tiktok.com',
-    batchCollectPageTypes: []
+    batchCollectPageTypes: [],
+    disabledReason: '暂未支持'
   },
   pgy: {
     label: '蒲公英',

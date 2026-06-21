@@ -107,7 +107,7 @@ function handleVideoDetailData(data: any) {
 }
 
 function handleUserData(data: any) {
-  const user = data?.user || data?.data?.user;
+  const user = data?.user || data?.data?.user || data?.data;
   if (!user?.id) return;
   
   const authorData = extractAuthorData(user);
@@ -183,6 +183,56 @@ function extractAuthorData(user: any): Partial<AuthorEntity> | null {
     workCount: user.photoNum || user.workCount,
     verified: !!user.verified,
     verifiedDesc: user.verifiedDesc,
+    sourcePageUrl: window.location.href
+  };
+}
+
+function parseKuaishouNumber(text: string): number | undefined {
+  const num = parseFloat(String(text || '').replace(/[^0-9.]/g, ''));
+  if (Number.isNaN(num)) return undefined;
+  if (text.includes('万')) return num * 10000;
+  if (text.includes('亿')) return num * 100000000;
+  return num;
+}
+
+function extractAuthorFromDOM(authorId?: string | null): Partial<AuthorEntity> | null {
+  if (!authorId) return null;
+
+  const profileRoot = document.querySelector<HTMLElement>('.profile-top, .profile-view, .user-info, .profile-header');
+  const nameEl = profileRoot?.querySelector('h1, .user, .name, .nickname') || document.querySelector('h1');
+  const avatarEl = profileRoot?.querySelector('img') as HTMLImageElement | null;
+  const name = nameEl?.textContent?.trim() || '';
+  const avatar = avatarEl?.src || '';
+
+  if (!name && !avatar) return null;
+
+  const profileText = profileRoot?.textContent || '';
+  const statTexts = Array.from(document.querySelectorAll<HTMLElement>('.profile-top span, .profile-top div, .user-info span, .user-info div'))
+    .map(el => el.textContent || '')
+    .filter(Boolean);
+  const fansText = statTexts.find(text => text.includes('粉丝')) || profileText.match(/粉丝\s*[\d.]+[万亿]?/)?.[0] || '';
+  const followText = statTexts.find(text => text.includes('关注')) || profileText.match(/关注\s*[\d.]+[万亿]?/)?.[0] || '';
+  const likedText = statTexts.find(text => text.includes('获赞')) || profileText.match(/获赞\s*[\d.]+[万亿]?/)?.[0] || '';
+  const bio = profileText
+    .replace(name, '')
+    .replace(/快手号：\S+/, '')
+    .replace(/性别：\S*/, '')
+    .replace(fansText, '')
+    .replace(followText, '')
+    .replace(likedText, '')
+    .replace('采集作者', '')
+    .trim();
+
+  return {
+    platform: 'kuaishou',
+    authorId,
+    name,
+    avatar,
+    profileUrl: `https://www.kuaishou.com/profile/${authorId}`,
+    bio: bio || undefined,
+    fansCount: parseKuaishouNumber(fansText),
+    followCount: parseKuaishouNumber(followText),
+    likedCount: parseKuaishouNumber(likedText),
     sourcePageUrl: window.location.href
   };
 }
@@ -312,7 +362,7 @@ function injectPostPageUI() {
 }
 
 function injectAuthorPageUI() {
-  const container = document.querySelector<HTMLElement>('.user-info-wrap, .profile-header, #user-info');
+  const container = document.querySelector<HTMLElement>('.user-info, .user-info-wrap, .profile-header, #user-info, .profile-top');
   if (!container) {
     setTimeout(injectAuthorPageUI, 500);
     return;
@@ -324,7 +374,7 @@ function injectAuthorPageUI() {
     
     const match = window.location.href.match(/\/profile\/([\w]+)/);
     const authorId = match?.[1];
-    const cachedAuthor = authorId ? collectedAuthors.get(authorId) : null;
+    const cachedAuthor = authorId ? (collectedAuthors.get(authorId) || extractAuthorFromDOM(authorId)) : null;
     
     if (cachedAuthor) {
       const response = await sendMessage('collect:author', {
@@ -347,6 +397,12 @@ function injectAuthorPageUI() {
     }
   });
   
+  button.classList.add('zl-ks-author-collect-btn');
+  button.style.position = 'relative';
+  button.style.zIndex = '999999';
+  button.style.marginTop = '12px';
+  button.style.marginLeft = '0';
+  button.style.pointerEvents = 'auto';
   container.appendChild(button);
   injectedUI = button;
 }

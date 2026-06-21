@@ -13,7 +13,7 @@ import TaskDetailDrawer from './components/TaskDetailDrawer';
 import Toast from './components/Toast';
 
 export default function App() {
-  const { currentPage, exportModalOpen, dimensImportModalOpen, detailDrawerOpen, taskDetailOpen, toastMessage } = useUIStore();
+  const { currentPage, exportModalOpen, detailDrawerOpen, taskDetailOpen, toastMessage } = useUIStore();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50 text-slate-900">
@@ -30,7 +30,6 @@ export default function App() {
       </main>
 
       {exportModalOpen && <ExportModal />}
-      {dimensImportModalOpen && currentPage !== 'dimensImport' && <DimensImportModal />}
       {detailDrawerOpen && <DetailDrawer />}
       {taskDetailOpen && <TaskDetailDrawer />}
       {toastMessage && <Toast />}

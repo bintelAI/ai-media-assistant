@@ -604,7 +604,7 @@ function handleSearchData(data: any) {
 }
 
 function handleUserData(data: any) {
-  const user = data?.user || data?.data?.user || data?.user_info || data?.data?.user_info;
+  const user = data?.user || data?.data?.user || data?.user_info || data?.data?.user_info || data?.data;
   const authorId = getAuthorPrimaryId(user);
   if (!authorId) return;
 
@@ -704,12 +704,18 @@ function extractAuthorData(user: any): Partial<AuthorEntity> | null {
   const authorId = getAuthorPrimaryId(user);
   if (!authorId) return null;
   const profilePathId = getDouyinProfilePathId(user);
+  const avatarUrl = user.avatar_medium?.url_list?.[0] ||
+    user.avatar_thumb?.url_list?.[0] ||
+    user.avatar_larger?.url_list?.[0] ||
+    user.avatar_300x300?.url_list?.[0] ||
+    user.avatar_168x168?.url_list?.[0] ||
+    user.avatar_url;
 
   return {
     platform: 'douyin',
     authorId,
     name: user.nickname || user.name || '',
-    avatar: user.avatar_medium?.url_list?.[0] || user.avatar_thumb?.url_list?.[0] || user.avatar_larger?.url_list?.[0] || user.avatar_url,
+    avatar: avatarUrl,
     profileUrl: `https://www.douyin.com/user/${profilePathId}`,
     bio: user.signature,
     fansCount: user.follower_count ?? user.mplatform_followers_count,
@@ -1073,14 +1079,14 @@ function getDouyinPostCollectText(postId?: string | null): string {
 
 function getDouyinActionContainerStyle(anchor: Element): string {
   if (isDouyinLeftGridAnchor(anchor)) {
-    return 'z-index: 99; position: absolute; right: 10px; display: flex; align-items: center;';
+    return 'z-index: 2147483647; position: absolute; right: 10px; display: flex; align-items: center; pointer-events: auto;';
   }
 
   if (anchor.tagName === 'DIV') {
-    return 'z-index: 99; display: flex; align-items: center; margin-top: 16px;';
+    return 'z-index: 2147483647; position: relative; display: flex; align-items: center; margin-top: 16px; pointer-events: auto;';
   }
 
-  return 'z-index: 99; display: inline-flex; align-items: center; margin-right: 16px;';
+  return 'z-index: 2147483647; position: relative; display: inline-flex; align-items: center; margin-right: 16px; pointer-events: auto;';
 }
 
 function isDouyinLeftGridAnchor(anchor: Element): boolean {
@@ -1160,17 +1166,27 @@ function getDouyinAuthorPathInfo(url = window.location.href): DouyinAuthorPathIn
 function extractAuthorFromDOM(authorPath?: DouyinAuthorPathInfo | null): Partial<AuthorEntity> | null {
   if (!authorPath?.id) return null;
 
-  const nameEl = document.querySelector('[data-e2e="user-name"], .nickname, .user-name');
-  const avatarEl = document.querySelector('[data-e2e="user-avatar"] img, .avatar img') as HTMLImageElement;
+  const nameEl = document.querySelector([
+    '[data-e2e="user-info"] h1',
+    '[data-e2e="user-detail"] h1',
+    '[data-e2e="user-name"]',
+    '.nickname',
+    '.user-name',
+    'h1'
+  ].join(', '));
+  const avatarEl = document.querySelector([
+    '[data-e2e="user-info"] img',
+    '[data-e2e="user-detail"] img',
+    '[data-e2e="live-avatar"] img',
+    '.avatar img',
+    'img[src*="avatar"]'
+  ].join(', ')) as HTMLImageElement;
   const name = nameEl?.textContent?.trim() || '';
   const avatar = avatarEl?.src || '';
 
   if (!name && !avatar) {
     return null;
   }
-
-  const statsEls = document.querySelectorAll('[data-e2e="user-stats"] span, .stats span, .count');
-  const statsTexts = Array.from(statsEls).map(el => el.textContent || '');
 
   const extractNum = (text: string): number | undefined => {
     const num = parseFloat(text.replace(/[^0-9.]/g, ''));
@@ -1179,14 +1195,35 @@ function extractAuthorFromDOM(authorPath?: DouyinAuthorPathInfo | null): Partial
     return isNaN(num) ? undefined : num;
   };
 
+  const textOf = (selector: string): string => document.querySelector(selector)?.textContent || '';
+  const statsEls = document.querySelectorAll('[data-e2e="user-stats"] span, .stats span, .count');
+  const statsTexts = Array.from(statsEls).map(el => el.textContent || '');
+  const followText = textOf('[data-e2e="user-info-follow"]') || statsTexts.find(text => text.includes('关注')) || statsTexts[1] || '';
+  const fansText = textOf('[data-e2e="user-info-fans"]') || statsTexts.find(text => text.includes('粉丝')) || statsTexts[0] || '';
+  const likeText = textOf('[data-e2e="user-info-like"]') || statsTexts.find(text => text.includes('获赞')) || '';
+  const workText = textOf('[data-e2e="user-work-tab"] h2') || textOf('h2');
+  const bioText = textOf('[data-e2e="user-info"]') || textOf('[data-e2e="user-detail"]');
+  const bio = bioText
+    .replace(name, '')
+    .replace(followText, '')
+    .replace(fansText, '')
+    .replace(likeText, '')
+    .replace(/抖音号：\S+/, '')
+    .replace(/IP属地：\S+/, '')
+    .replace('采集作者', '')
+    .trim();
+
   return {
     platform: 'douyin',
     authorId: authorPath.id,
     name,
     avatar,
     profileUrl: `https://www.douyin.com/user/${authorPath.id}`,
-    fansCount: extractNum(statsTexts[0] || ''),
-    followCount: extractNum(statsTexts[1] || ''),
+    bio: bio || undefined,
+    fansCount: extractNum(fansText),
+    followCount: extractNum(followText),
+    likedCount: extractNum(likeText),
+    workCount: extractNum(workText),
     sourcePageUrl: window.location.href
   };
 }
@@ -1322,10 +1359,14 @@ function ensureDouyinActionStyles() {
   style.id = DOUYIN_ACTION_STYLE_ID;
   style.textContent = `
     .zl-douyin-action-root {
+      position: relative;
+      z-index: 2147483647;
       pointer-events: auto;
     }
 
     .zl-douyin-action-button {
+      position: relative;
+      z-index: 2147483647;
       height: 32px;
       min-width: 72px;
       display: inline-flex;
